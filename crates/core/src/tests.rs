@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{Session, commands};
 use crate::geom::P2;
+use crate::language::Language;
 use crate::model::{Facing, Model};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -2649,6 +2650,40 @@ fn a_project_in_spanish_names_what_it_makes_in_spanish() {
         [Facing::parse("Sur"), Facing::parse("leste"), Facing::parse("West")],
         [Some(Facing::South), Some(Facing::East), Some(Facing::West)]
     );
+}
+
+#[test]
+fn a_project_in_vietnamese_names_what_it_makes_in_vietnamese_and_keeps_it_in_a_file() {
+    let mut s = Session::new();
+    run(&mut s, "new", json!({"language": "vi"}));
+    let i = run(&mut s, "inspect", json!({}));
+    assert_eq!([&i["name"], &i["levels"][1]["name"], &i["language"]], [&json!("Dự án"), &json!("Cao độ 2"), &json!("vi")]);
+    house(&mut s);
+    assert_eq!(run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["name"], "Mặt cắt 1");
+    let room = run(&mut s, "room", json!({"point": [4000, 3000]}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, room)["name"], "Phòng");
+    run(&mut s, "sheet", json!({}));
+    // A schedule's title, and a name typed in the project's own words, as any other language.
+    let vp = run(&mut s, "place", json!({"sheet": "A101", "view": "bảng thống kê phòng"}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, vp)["title"], "Bảng thống kê phòng");
+    assert_eq!(
+        [Facing::parse("Nam"), Facing::parse("đông"), Facing::parse("West")],
+        [Some(Facing::South), Some(Facing::East), Some(Facing::West)]
+    );
+    // Its language goes in the file at the format this build writes, and comes back out of it.
+    let path = std::env::temp_dir().join(format!("bimcraft-vi-{}.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": path.to_str().unwrap()}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\"language\":\"vi\"") || text.contains("\"language\": \"vi\""), "the file says which language it is");
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": path.to_str().unwrap()}));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(t.model.format, crate::model::FORMAT);
+    assert_eq!(t.model.language, Language::Vietnamese);
+    let named = run(&mut t, "level", json!({"elevation": 9000}))["name"].as_str().unwrap().to_string();
+    assert!(named.starts_with("Cao độ "), "a level the opened project makes is named in its language, not {named:?}");
+    // A file that says vi on a build that has it opens; one a newer build wrote is refused, as always.
+    assert!(s.execute("language", &json!({"code": "klingon"})).unwrap_err().contains("vi"));
 }
 
 /// A cavity wall type, outside in: brick, insulation, block and plaster, 300 mm in all; its

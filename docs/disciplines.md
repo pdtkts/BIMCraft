@@ -157,7 +157,7 @@ the four took a few lines in each of these places, and the tests are rows in two
 3. **Desktop.** A `Tab` variant and a `fn xxx_tab` in `mep.rs`: buttons for `Tool::Run(category, None)` and for the `FIXTURES`
    rows (a `FixtureTool` is a key, the kinds of family it places, its shortcut, its words and its icon); the title in
    `structure::title`; `properties.rs` (`icon`; the run rows and type rows already take any run category); icons in icons.rs; the
-   family editor's labels in editor.rs; the Portuguese and Spanish rows in lang.rs (the words each standard uses).
+   family editor's labels in editor.rs; the Portuguese, Spanish and Vietnamese rows in lang.rs (the words each standard uses).
 4. **Tests.** A row in `CASES` (the run categories) and `FIXTURES` (the families) of `mep_tests.rs`, which make, refuse, move,
    draw in plan, cut in a section, show in 3D, snap to, schedule, hide, save, write to IFC and read back every category in them;
    and a row in `RUN_TOOLS` and `FIXTURE_TOOLS` of `tests/mep.rs`, which drive each tool, its options, its previews, its shortcut,
@@ -181,7 +181,7 @@ the four took a few lines in each of these places, and the tests are rows in two
 - Braces are beams that slope; they will want their own type and `IfcMember`.
 - Import finds a run's section as the box round its body in the frame the axis gives it, so a member rolled about its axis
   reads as the box. An upright run comes back running up with its width along east, whichever end it was drawn from.
-- The Portuguese and Spanish words are the standards' as the author knows them; no native speaker has read them.
+- The Portuguese, Spanish and Vietnamese words are the standards' as the author knows them; no native speaker has read them.
 
 What the foundation's limits were, and is fixed: a section cutting a round run; the `IfcSystem`; a run's justification surviving
 an import; Edit Type setting a run type's roundness and material.

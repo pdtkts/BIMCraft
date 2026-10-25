@@ -46,8 +46,8 @@ pub static ALL: &[Command] = &[
     other(
         "new",
         "New",
-        "{name?, language?: en|pt|es} an empty project with Level 1 (0) and Level 2 (3000), named in its language (Nível 1, \
-         Nível 2 in Portuguese; Nivel 1, Nivel 2 in Spanish)",
+        "{name?, language?: en|pt|es|vi} an empty project with Level 1 (0) and Level 2 (3000), named in its language (Nível 1, \
+         Nível 2 in Portuguese; Nivel 1, Nivel 2 in Spanish; Cao độ 1, Cao độ 2 in Vietnamese)",
         new,
     ),
     other("open", "Open", "{path} a .bimcraft project", open),
@@ -774,9 +774,9 @@ pub static ALL: &[Command] = &[
         "language",
         "Project Language",
         &[],
-        "{code?: en|pt|es} the language the project's drawings speak (a stair's UP, a title block's SCALE, a schedule's \
+        "{code?: en|pt|es|vi} the language the project's drawings speak (a stair's UP, a title block's SCALE, a schedule's \
          headings) and new names come in (levels, sections, elevations, sheets, rooms, schedules): English, Brazilian \
-         Portuguese or Spanish. What's already named stays named",
+         Portuguese, Spanish or Vietnamese. What's already named stays named",
         language,
     ),
     other("inspect", "Inspect", "{} levels, element counts, types, warnings and undo history", inspect),
@@ -1474,8 +1474,9 @@ fn new(s: &mut Session, p: &Value) -> R {
 }
 
 fn language_param(c: &str, code: &str) -> Result<Language, String> {
-    Language::from_code(code)
-        .ok_or_else(|| bad(c, format!("`{code}` is no language here; there are en (English), pt (Português) and es (Español)")))
+    Language::from_code(code).ok_or_else(|| {
+        bad(c, format!("`{code}` is no language here; there are en (English), pt (Português), es (Español) and vi (Tiếng Việt)"))
+    })
 }
 
 fn language(s: &mut Session, p: &Value) -> R {

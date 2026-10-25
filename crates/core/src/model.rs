@@ -58,13 +58,14 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 4: a line weight is a pen (0 to 16), not
+/// The version of the project file this build writes, and the newest it reads. 5: a project's language can be Vietnamese
+/// (`vi`), which an older build would refuse the whole file over. 4: a line weight is a pen (0 to 16), not
 /// pixels of a sheet's drawing. 3: a type's layers and a family's forms and
 /// symbols hold ids and GUIDs; a family's types and parameters are library entries, and what uses them names them by GUID.
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 4;
+pub const FORMAT: u32 = 5;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -2071,7 +2072,8 @@ impl Model {
         Ok((m, left_out))
     }
 
-    /// Brought up to [`FORMAT`]. From before pens, see [`pens_from_pixels`]. From before GUIDs: each element was given one as it was read, what points at an element
+    /// Brought up to [`FORMAT`]. From before Vietnamese (`vi`), which an older build would refuse the file over: nothing to
+    /// do, as a project in any other language reads the same. From before pens, see [`pens_from_pixels`]. From before GUIDs: each element was given one as it was read, what points at an element
     /// (its id, then) points at its GUID, and the ids move up to six digits, by as much as takes the first to [`FIRST_ID`]
     /// (`1` is `100000`, `7` is `100006`).
     pub fn migrate(&mut self) {

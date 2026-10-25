@@ -39,7 +39,7 @@ fn the_window_speaks_chinese_once_it_is_put_in_it_and_keeps_to_it() {
 #[test]
 fn without_a_font_for_hanzi_the_window_stays_as_it_was_and_says_why() {
     let mut h = app(BOX);
-    h.state_mut().font_finder = || None;
+    h.state_mut().font_finder = |_| None;
     let ctx = h.ctx.clone();
     h.state_mut().set_lang(&ctx, Lang::Chinese);
     h.run();
@@ -48,14 +48,14 @@ fn without_a_font_for_hanzi_the_window_stays_as_it_was_and_says_why() {
     assert!(status.error && status.text.starts_with("No font with Chinese characters"), "{status:?}");
     // A settings file that says Chinese on a machine with no font: the window comes up in English, not in boxes.
     let mut start = app(BOX);
-    start.state_mut().font_finder = || None;
+    start.state_mut().font_finder = |_| None;
     start.state_mut().lang = Lang::Chinese;
     start.run();
     assert_eq!(start.state().lang, Lang::English);
     assert!(start.state().status.error);
     // In Portuguese, the reason is said in it.
     let mut pt = app(BOX);
-    pt.state_mut().font_finder = || None;
+    pt.state_mut().font_finder = |_| None;
     pt.state_mut().lang = Lang::Portuguese;
     pt.run();
     let ctx = pt.ctx.clone();

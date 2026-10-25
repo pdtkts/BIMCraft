@@ -816,7 +816,7 @@ fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     }
     use crate::lang::Lang;
     for (_, name) in crate::shortcuts() {
-        for l in [Lang::Portuguese, Lang::Spanish] {
+        for l in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese] {
             assert!(crate::lang::translated_in(l, name).is_some(), "{name} in {l:?}");
         }
     }
@@ -2331,9 +2331,10 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}\nroof {{}}\ncomponent {{\"family\": \"WC\", \"at\": [4000, 5850]}}\n{extra}"));
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
-    for l in [Lang::Portuguese, Lang::Spanish, Lang::Chinese] {
-        // A machine has the fonts it has: a window is told it has one for Chinese.
+    for l in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::Chinese] {
+        // A machine has the fonts it has: a window is told it has one for either of those that needs one.
         crate::lang::assume_chinese_font(&h.ctx);
+        crate::lang::assume_vietnamese_font(&h.ctx);
         h.state_mut().lang = l;
         h.run();
         let tr = |en: &'static str| crate::lang::translated_in(l, en).unwrap_or(en);
@@ -4618,7 +4619,7 @@ fn demolish_says_so_when_what_is_clicked_holds_no_parameters_and_changes_nothing
 }
 
 #[test]
-fn demolish_speaks_portuguese_and_spanish() {
+fn demolish_speaks_every_language_the_window_has() {
     use crate::lang::Lang;
     let mut h =
         app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}\ndimension {{\"refs\": [[0, 3000], [8000, 3000]], \"at\": [4000, -1000]}}"));
@@ -4641,8 +4642,24 @@ fn demolish_speaks_portuguese_and_spanish() {
             "Puerta acompaña al muro, que se demuele en New Construction: deshaga la demolición del muro",
             "Cota no tiene parámetros, así que no tiene fase que demoler",
         ),
+        (
+            Lang::Vietnamese,
+            "Phá dỡ",
+            "Bấm vào một phần tử để phá dỡ nó ở pha của khung nhìn; bấm lần nữa để hoàn tác.",
+            "Cửa đi đi theo tường của nó, mà tường bị phá dỡ ở New Construction: hãy hoàn tác việc phá dỡ tường",
+            "Kích thước không có tham số, nên không có pha để phá dỡ",
+        ),
     ];
+    // The Vietnamese sentence above is the table's, so a change there fails here rather than passing silently.
+    assert!(
+        crate::lang::translated_in(Lang::Vietnamese, "{} holds no parameters, so it has no phase to demolish")
+            .is_some_and(|s| s.replace("{}", "Kích thước").starts_with("Kích thước không có tham số")),
+        "the test's Vietnamese is the table's"
+    );
     for (language, button, prompt, follows, none) in cases {
+        if language == Lang::Vietnamese {
+            crate::lang::assume_vietnamese_font(&h.ctx);
+        }
         h.state_mut().lang = language;
         h.run();
         press(&mut h, button);
@@ -4890,6 +4907,7 @@ mod planviews;
 mod purge;
 mod revit;
 mod start;
+mod vietnamese;
 mod window;
 
 #[test]
@@ -5383,7 +5401,7 @@ mod updates {
             "Opens the release page on GitHub. This copy can't update itself.",
             "Asks to save first if there are unsaved changes, then closes BIMCraft, installs the update and starts it again.",
         ];
-        for language in [Lang::Portuguese, Lang::Spanish] {
+        for language in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese] {
             for word in words {
                 assert!(crate::lang::translated_in(language, word).is_some(), "{language:?} has no {word:?}");
             }

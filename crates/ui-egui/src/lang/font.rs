@@ -1,6 +1,8 @@
-//! A font of the system's with Chinese glyphs, for the window to draw hanzi with: egui's own have none, and a CJK font is too big
+//! A font of the system's with Chinese glyphs, for the window to draw hanzi with, and one with the Vietnamese tone marks:
+//! egui's own has no hanzi and lacks a quarter of the marks. A CJK font is too big
 //! to bundle. The places each system keeps its Chinese fonts are tried in turn, then the folders of the fonts a Linux desktop
-//! has installed are looked through.
+//! has installed are looked through. A Vietnamese font is checked glyph by glyph, because its name says little: Segoe UI and
+//! Arial hold the marks, Ubuntu-Light, which egui bundles, does not.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +29,71 @@ const KNOWN: &[(&str, u32)] = &[
     ("/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc", 0),
     ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0),
 ];
+
+/// Fonts with the Vietnamese tone marks, by where each system keeps them. A candidate is only taken once its glyphs have
+/// been checked ([`super::font_covers`]): a name says what a font is meant to hold, its character map says what it does.
+const VIETNAMESE: &[&str] = &[
+    r"C:\Windows\Fonts\segoeui.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\tahoma.ttf",
+    r"C:\Windows\Fonts\times.ttf",
+    r"C:\Windows\Fonts\calibri.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSans-Regular.otf",
+];
+
+/// Names of fonts, looked for in the system's font folders, that hold the Vietnamese tone marks.
+const VIETNAMESE_NAMES: &[&str] = &["notosans-regular", "notosans-vietnamese", "dejavusans", "liberationsans-regular", "arial", "segoeui"];
+
+/// The font bytes and the face to use, of the first font of the system's that covers every Vietnamese letter.
+pub(super) fn find_vietnamese() -> Option<(Vec<u8>, u32)> {
+    let known = VIETNAMESE.iter().map(|&path| (PathBuf::from(path), 0));
+    known.chain(scan_vietnamese()).find_map(|(path, face)| {
+        let size = std::fs::metadata(&path).ok()?.len();
+        if size > MAX_FONT {
+            return None;
+        }
+        let bytes = std::fs::read(&path).ok()?;
+        super::font_covers(bytes.clone(), face, super::VIETNAMESE_LETTERS).then_some((bytes, face))
+    })
+}
+
+/// The fonts in the folders whose names say they may have Vietnamese, preferred ones first.
+fn scan_vietnamese() -> Vec<(PathBuf, u32)> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut found: Vec<(usize, PathBuf)> = Vec::new();
+    for folder in FOLDERS {
+        let folder =
+            if folder.starts_with('/') { PathBuf::from(folder) } else { home.iter().map(|h| h.join(folder)).next().unwrap_or_default() };
+        look_named(&folder, 4, VIETNAMESE_NAMES, &mut found);
+    }
+    found.sort();
+    found.into_iter().map(|(_, path)| (path, 0)).collect()
+}
+
+/// Looks through `folder` (a few levels down) for fonts whose file name is one of `names`.
+fn look_named(folder: &Path, depth: u32, names: &[&str], found: &mut Vec<(usize, PathBuf)>) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if depth > 0 {
+                look_named(&path, depth - 1, names, found);
+            }
+            continue;
+        }
+        let name = path.file_stem().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let font = path.extension().is_some_and(|e| matches!(e.to_string_lossy().to_lowercase().as_str(), "ttf" | "ttc" | "otf"));
+        if let Some(rank) = names.iter().position(|n| name == *n).filter(|_| font) {
+            found.push((rank, path));
+        }
+    }
+}
 
 /// Folders of a Linux desktop's fonts, looked through (a few levels down) when none of the known places has one.
 const FOLDERS: &[&str] = &["/usr/share/fonts", "/usr/local/share/fonts", ".local/share/fonts", ".fonts"];

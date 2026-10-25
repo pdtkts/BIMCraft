@@ -842,7 +842,7 @@ impl BimApp {
             note_text: String::new(),
             units,
             lang: Lang::English,
-            font_finder: lang::chinese_font,
+            font_finder: lang::system_font,
             typed_length: String::new(),
             dim_edit: None,
             temporary: HashMap::new(),
@@ -1054,9 +1054,14 @@ impl BimApp {
         }
         style::follow(&ctx);
         // Chinese needs a font with its glyphs, which the system may not have: then the window stays in English and says why.
+        // Vietnamese needs one with the tone marks, which egui's own fonts lack.
         if self.lang == Lang::Chinese && !lang::use_chinese_font(&ctx, self.font_finder) {
             self.lang = Lang::English;
             self.status = updates::failed(t(lang::NO_CHINESE_FONT).to_string());
+        }
+        if self.lang == Lang::Vietnamese && !lang::use_vietnamese_font(&ctx, self.font_finder) {
+            self.lang = Lang::English;
+            self.status = updates::failed(t(lang::NO_VIETNAMESE_FONT).to_string());
         }
         lang::set(self.lang);
         // What agents asked of the project comes before the tidying, which puts right what a command left stale.

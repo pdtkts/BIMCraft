@@ -48,6 +48,15 @@ egui's own fonts have no hanzi, so the window in Chinese needs a font the system
 language is Chinese. Where there is none, `set_lang` leaves the language as it was and the status says why, and a settings file that says
 Chinese on such a machine starts the window in English. The app holds the finder (`font_finder`) so a test can say there is none.
 
+Vietnamese is a project's language as well (`Language::Vietnamese`), so its words are the table's fourth column, in both
+`crates/core/src/language.rs` (what drawings print and what commands name) and `lang.rs` (`WORDS`, the window's labels and tips).
+It is the first language whose marks egui's own fonts lack — Ubuntu-Light is missing 88 of the 132 letters of
+`VIETNAMESE_LETTERS`, the tone-marked forms in both cases — so `lang::use_vietnamese_font` finds a font of the system's the same
+way: but a name says little, so `lang::font_covers` puts the candidate in a scratch `Fonts` and asks it for every letter of
+`VIETNAMESE_LETTERS` before taking it, and only one that covers all 132 is used. A drawing's own lettering needs none of this: `crates/core/src/font.rs`
+draws the marks itself (a breve on ă, a horn on ơ and ư, hooks, a dot below, and a tone over a shape on ế ắ ộ and the like), which is
+why Vietnamese can be a project's language where Chinese cannot.
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)

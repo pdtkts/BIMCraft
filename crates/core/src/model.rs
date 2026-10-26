@@ -58,8 +58,10 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 5: a project's language can be Vietnamese
-/// (`vi`), which an older build would refuse the whole file over. 4: a line weight is a pen (0 to 16), not
+/// The version of the project file this build writes, and the newest it reads. 5: a project holds scans (`clouds`, library
+/// entries of kind `Cloud`) and point clouds place them, and its language can be Vietnamese (`vi`); nothing in a file of 4
+/// changes, but a build that reads up to 4 would answer one of 5 with a serde error, not "saved by a newer BIMCraft" (a
+/// language it doesn't know, too). 4: a line weight is a pen (0 to 16), not
 /// pixels of a sheet's drawing. 3: a type's layers and a family's forms and
 /// symbols hold ids and GUIDs; a family's types and parameters are library entries, and what uses them names them by GUID.
 /// 2: the library has ids and GUIDs too
@@ -1602,7 +1604,7 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub images: BTreeMap<String, Picture>,
     /// The scans its point clouds place, by name.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cloud::deserialize_scans")]
     pub clouds: BTreeMap<String, Cloud>,
     /// Its families, by name: what components place.
     #[serde(default)]
@@ -2072,7 +2074,8 @@ impl Model {
         Ok((m, left_out))
     }
 
-    /// Brought up to [`FORMAT`]. From before Vietnamese (`vi`), which an older build would refuse the file over: nothing to
+    /// Brought up to [`FORMAT`]. From before scans (`clouds`, and the point clouds that place them), which a file of 4 holds
+    /// none of: nothing to do. From before Vietnamese (`vi`), which an older build would refuse the file over: nothing to
     /// do, as a project in any other language reads the same. From before pens, see [`pens_from_pixels`]. From before GUIDs: each element was given one as it was read, what points at an element
     /// (its id, then) points at its GUID, and the ids move up to six digits, by as much as takes the first to [`FIRST_ID`]
     /// (`1` is `100000`, `7` is `100006`).
@@ -2101,6 +2104,8 @@ impl Model {
             }
         }
         self.next_id = self.next_id.max(FIRST_ID);
+        // 4 to 5 (scans, and the point clouds that place them; a project's language being Vietnamese) has no step: a file of
+        // 4 holds none of it, or holds it as 5 does.
         self.format = FORMAT;
     }
 

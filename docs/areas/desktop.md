@@ -57,6 +57,24 @@ way: but a name says little, so `lang::font_covers` puts the candidate in a scra
 draws the marks itself (a breve on ă, a horn on ơ and ư, hooks, a dot below, and a tone over a shape on ế ắ ộ and the like), which is
 why Vietnamese can be a project's language where Chinese cannot.
 
+The font goes **in front of** egui's own (`FontPriority::Highest`), not behind it: behind it, it would draw only the letters
+egui's own lacks, so a word's tone-marked letters would come from the system's font and every unmarked letter of the same word
+from Ubuntu-Light — two faces with two weights in one word, which read as the marked letters being bold. Twice measured:
+at 28 pt, `o e a n h u i l c t r` are 2.6 texels of stroke in Ubuntu-Light, 3.4 in Segoe UI, 2.5 in Calibri Light,
+2.8 in Segoe UI Semilight.
+
+Because the font now draws the whole run, it must draw like Ubuntu-Light does — the same weight and the same size — or
+Vietnamese text sits differently from the English beside it. `lang::font_weighs_like` measures weight as the widest run of
+ink on scanlines through the middle of each glyph (`lang::stroke_weight`) and `lang::font_draws_the_same_size` measures the
+ink height of `x` at `MEASURED_AT` (100 pt, so the whole texels a glyph is rasterized into cannot make two faces that draw
+the same size differ); a candidate more than `WEIGHT_SLACK` (a tenth) off in weight, or `SIZE_SLACK` (a twentieth) off in
+size, is refused. The two go wrong in opposite ways, which is why both are asked: Segoe UI is the right size and a third
+heavier (3.4 texels of stroke at 28 pt against Ubuntu-Light's 2.6), so Vietnamese words read as bold; Calibri Light weighs
+right and draws smaller (x-height 6 texels at 13 pt against 7), so the window shrinks. `lang/font.rs` lists the candidates
+that do both first — on Windows, Segoe UI Semilight — and `font::find_vietnamese` takes the first that covers every letter,
+weighs right and draws at the right size, falling back to the first that covers them where no such font is installed (a
+heavy or small font is better than boxes).
+
 What a view hides or reveals for now (Temporary Hide/Isolate, Reveal Hidden Elements; `footer.rs`) is the window's, per `Sheet`, never the
 project's: the plan, the section and the 3D view draw `BimApp::view_model`, a copy of the model whose view graphics went through the `graphics`
 command on a scratch `Session`, made once for each model and each setting. A tool that needs the view's real model (select all, commands)

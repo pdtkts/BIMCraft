@@ -31,13 +31,25 @@ const KNOWN: &[(&str, u32)] = &[
 ];
 
 /// Fonts with the Vietnamese tone marks, by where each system keeps them. A candidate is only taken once its glyphs have
-/// been checked ([`super::font_covers`]): a name says what a font is meant to hold, its character map says what it does.
+/// been checked ([`super::font_covers`]), its strokes weighed against egui's own ([`super::font_weighs_like`]) and its
+/// letters measured against them ([`super::font_draws_the_same_size`]): a name says what a font is meant to hold, its
+/// character map says what it does, its weight says how it sits beside the letters it is drawn among, and its size says
+/// whether the window looks the same in Vietnamese as in English.
+///
+/// Order matters. Weight and size go wrong in opposite ways, which is why both are asked: the first font with the marks a
+/// Windows machine offers is Segoe UI, right size and a third heavier (3.4 texels of stroke at 28 pt against Ubuntu-Light's
+/// 2.6), so a Vietnamese word would look bold; Calibri Light weighs right and draws smaller (x-height 6 at 13 pt against
+/// 7), so the window would shrink. Segoe UI Semilight is the one that does both, so it leads the list; the entries after it
+/// are for the machines that lack it.
 const VIETNAMESE: &[&str] = &[
-    r"C:\Windows\Fonts\segoeui.ttf",
-    r"C:\Windows\Fonts\arial.ttf",
-    r"C:\Windows\Fonts\tahoma.ttf",
+    r"C:\Windows\Fonts\segoeuisl.ttf",
+    r"C:\Windows\Fonts\calibril.ttf",
+    r"C:\Windows\Fonts\segoeuil.ttf",
     r"C:\Windows\Fonts\times.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
     r"C:\Windows\Fonts\calibri.ttf",
+    r"C:\Windows\Fonts\tahoma.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
@@ -47,20 +59,47 @@ const VIETNAMESE: &[&str] = &[
     "/usr/share/fonts/opentype/noto/NotoSans-Regular.otf",
 ];
 
-/// Names of fonts, looked for in the system's font folders, that hold the Vietnamese tone marks.
-const VIETNAMESE_NAMES: &[&str] = &["notosans-regular", "notosans-vietnamese", "dejavusans", "liberationsans-regular", "arial", "segoeui"];
+/// Names of fonts, looked for in the system's font folders, that hold the Vietnamese tone marks, the ones that draw like
+/// egui's own — its weight and its size — first.
+const VIETNAMESE_NAMES: &[&str] = &[
+    "segoeuisl",
+    "calibril",
+    "segoeuil",
+    "notosans-regular",
+    "notosans-vietnamese",
+    "dejavusans",
+    "liberationsans-regular",
+    "arial",
+    "segoeui",
+];
 
-/// The font bytes and the face to use, of the first font of the system's that covers every Vietnamese letter.
+/// The font bytes and the face to use, of the first font of the system's that covers every Vietnamese letter, draws at
+/// the size egui's own draws at and weighs what it weighs; of the first that covers every letter, whatever its weight or
+/// size, where no such font is here.
 pub(super) fn find_vietnamese() -> Option<(Vec<u8>, u32)> {
-    let known = VIETNAMESE.iter().map(|&path| (PathBuf::from(path), 0));
-    known.chain(scan_vietnamese()).find_map(|(path, face)| {
+    let candidates = VIETNAMESE.iter().map(|&path| (PathBuf::from(path), 0)).chain(scan_vietnamese());
+    let read = |(path, face): (PathBuf, u32)| {
         let size = std::fs::metadata(&path).ok()?.len();
         if size > MAX_FONT {
             return None;
         }
         let bytes = std::fs::read(&path).ok()?;
         super::font_covers(bytes.clone(), face, super::VIETNAMESE_LETTERS).then_some((bytes, face))
-    })
+    };
+    // Weight and size decide which font among the ones that cover the letters, and they go wrong in opposite ways: Segoe
+    // UI draws at egui's own size a third heavier, Calibri Light weighs right and draws a seventh smaller (so the window
+    // shrinks when it is put in Vietnamese). A candidate that fails either is kept only as a last resort, so a machine
+    // with no font that does both still shows Vietnamese words instead of boxes.
+    let mut covering = Vec::new();
+    for candidate in candidates {
+        if let Some(font) = read(candidate) {
+            if super::font_weighs_like(font.0.clone(), font.1) && super::font_draws_the_same_size(font.0.clone(), font.1) {
+                return Some(font);
+            }
+            covering.push(font);
+        }
+    }
+    covering.into_iter().next()
 }
 
 /// The fonts in the folders whose names say they may have Vietnamese, preferred ones first.

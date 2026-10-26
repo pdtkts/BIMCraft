@@ -19,7 +19,7 @@ mod zh;
 use std::cell::Cell;
 
 use bimcraft_core::language::Language;
-use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
+use egui::epaint::text::{FontDefinitions, FontInsert, FontPriority, InsertFontFamily};
 use egui::{Context, FontData, FontFamily, Id};
 
 /// The interface's language: one of a project's languages, or Simplified Chinese.
@@ -132,8 +132,13 @@ pub fn vietnamese_font() -> Option<(Vec<u8>, u32)> {
     font::find_vietnamese()
 }
 
-/// Puts a font that `find` finds, with Vietnamese letters, behind the window's own, once; false where there is none.
+/// Puts a font that `find` finds, with Vietnamese letters, in front of the window's own, once; false where there is none.
 /// egui's own fonts lack a quarter of the tone marks, so a window in Vietnamese without one would show boxes for them.
+///
+/// In front, not behind ([`FontPriority::Highest`]): behind egui's own the font would draw only the letters egui's own
+/// lacks, so the tone-marked letters would come from it and every unmarked letter of the same word from egui's own — two
+/// faces, two weights, in one word. Which system font is picked, and why it must weigh what egui's own weighs, is
+/// [`font`]'s. The test `the_whole_word_is_drawn_by_one_face_and_not_only_its_marks` holds this.
 pub fn use_vietnamese_font(ctx: &Context, find: FontFinder) -> bool {
     if has_vietnamese_font(ctx) {
         return true;
@@ -141,14 +146,83 @@ pub fn use_vietnamese_font(ctx: &Context, find: FontFinder) -> bool {
     let Some((bytes, index)) = find(Lang::Vietnamese) else { return false };
     let mut data = FontData::from_owned(bytes);
     data.index = index;
-    let family = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
+    let family = |family| InsertFontFamily { family, priority: FontPriority::Highest };
     ctx.add_font(FontInsert::new("vietnamese", data, vec![family(FontFamily::Proportional), family(FontFamily::Monospace)]));
     ctx.data_mut(|d| d.insert_temp(Id::new("vietnamese-font"), true));
     true
 }
 
-/// Whether egui could draw `text` once `bytes` were added: its own faces and the system's, all of `text` covered. What
+/// Whether `bytes` draws at the size egui's own font does, so text does not shrink when the window is put in
+/// Vietnamese. Where `font_weighs_like` asks how heavy a face is, this asks how big: the height of a lowercase letter,
+/// which is what the eye compares between two faces.
+///
+/// It is the other half of the reason a candidate is refused — the two mistakes are opposite: Segoe UI is the right size
+/// and a third heavier, Calibri Light is the right weight and draws smaller — so a candidate must pass both.
+pub(crate) fn font_draws_the_same_size(bytes: Vec<u8>, index: u32) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    let size_of = |definitions: egui::epaint::text::FontDefinitions| {
+        let mut fonts = egui::epaint::text::Fonts::new(egui::epaint::text::TextOptions::default(), definitions);
+        x_height(&mut fonts)
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let ours = size_of(single("candidate", bytes, index));
+        let theirs = size_of(FontDefinitions::default());
+        theirs > 0.0 && (ours - theirs).abs() <= SIZE_SLACK * theirs
+    }))
+    .unwrap_or(false)
+}
+
+/// How much a font's letters may differ in size from egui's own, as a fraction: a twentieth, the difference the eye
+/// reads as text that shrank. Calibri Light is an eleventh smaller and is refused for it; Segoe UI Semilight matches.
+const SIZE_SLACK: f32 = 0.05;
+
+/// The size the x-height is measured at: large, so that the whole texels a glyph is rasterized into are a hundredth of
+/// the letter and two faces that draw the same size cannot differ by one of them.
+const MEASURED_AT: f32 = 100.0;
+
+/// The height of `x`'s ink in texels at [`MEASURED_AT`] pt: the height of a lowercase letter, which is what the eye
+/// compares between two faces more than the advance or the row height. The ink, not the glyph's box: the box carries the
+/// face's own ascender and descender, which differ between faces that draw their letters at the very same size.
+fn x_height(fonts: &mut egui::epaint::text::Fonts) -> f32 {
+    let job =
+        egui::epaint::text::LayoutJob::simple("x".to_owned(), egui::FontId::proportional(MEASURED_AT), egui::Color32::WHITE, f32::INFINITY);
+    let galley = fonts.with_pixels_per_point(1.0).layout_job(job);
+    let atlas = fonts.image();
+    let mut ink = (None, 0usize);
+    for row in &galley.rows {
+        for glyph in &row.glyphs {
+            let (x0, x1) = (glyph.uv_rect.min[0] as usize, glyph.uv_rect.max[0] as usize);
+            let (y0, y1) = (glyph.uv_rect.min[1] as usize, glyph.uv_rect.max[1] as usize);
+            for y in y0..y1 {
+                if (x0..x1).any(|x| atlas.pixels[y * atlas.size[0] + x].a() > 0) {
+                    ink.0.get_or_insert(y);
+                    ink.1 = y;
+                }
+            }
+        }
+    }
+    match ink.0 {
+        Some(top) => (ink.1 - top + 1) as f32,
+        None => 0.0,
+    }
+}
+
+/// One face as `name`, for asking what it draws like.
+fn single(name: &str, bytes: Vec<u8>, index: u32) -> FontDefinitions {
+    let mut definitions = FontDefinitions::default();
+    definitions.font_data.insert(name.to_owned(), std::sync::Arc::new(font(bytes, index)));
+    definitions.families.insert(FontFamily::Proportional, vec![name.to_owned()]);
+    definitions.families.insert(FontFamily::Monospace, vec![name.to_owned()]);
+    definitions
+}
+
+/// Whether egui could draw `text` once `bytes` were added: the font's own character map has every letter of it. What
 /// [`vietnamese_font`] uses to tell a font that really has the marks from one whose name only says so.
+///
+/// The character map, not `Fonts::has_glyphs`: that answers about the whole fallback chain, and reports false for every
+/// letter of a face that is its own replacement glyph's face — which a candidate read on its own is.
 pub(crate) fn font_covers(bytes: Vec<u8>, index: u32, text: &str) -> bool {
     if bytes.len() < 4 {
         return false;
@@ -156,18 +230,93 @@ pub(crate) fn font_covers(bytes: Vec<u8>, index: u32, text: &str) -> bool {
     // A file that says it is a font and is not: epaint's parser panics on one (it treats a bad file as impossible).
     // A candidate that cannot be read is simply not a font the window can use.
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use egui::epaint::text::{FontDefinitions, Fonts, TextOptions};
-        let mut data = FontData::from_owned(bytes);
-        data.index = index;
-        let mut definitions = FontDefinitions::default();
-        definitions.font_data.insert("candidate".to_owned(), std::sync::Arc::new(data));
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            definitions.families.entry(family).or_default().push("candidate".to_owned());
-        }
-        let mut fonts = Fonts::new(TextOptions::default(), definitions);
-        fonts.has_glyphs(&egui::FontId::proportional(14.0), text)
+        let mut fonts = egui::epaint::text::Fonts::new(egui::epaint::text::TextOptions::default(), single("candidate", bytes, index));
+        let mut face = fonts.fonts.font(&FontFamily::Proportional);
+        let characters = face.characters().clone();
+        text.chars().all(|c| characters.contains_key(&c))
     }))
     .unwrap_or(false)
+}
+
+/// Whether `bytes` weighs what egui's own font does, so a run of it beside the window's own text is not a shade heavier
+/// or lighter. Where `covers` asks what a face has, this asks how it draws: the mean width of a stroke through the middle
+/// of `o`, `e`, `a` and the letters like them, which is what the eye reads as bold.
+///
+/// It is one of the two reasons [`vietnamese_font`] refuses a font, and the one that matters when the font goes
+/// *in front* ([`use_vietnamese_font`]): Segoe UI, the marks and all, is a third heavier than the Ubuntu-Light egui draws
+/// the rest of the window with, so a Vietnamese word among English ones reads as bold.
+pub(crate) fn font_weighs_like(bytes: Vec<u8>, index: u32) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    let weight = |definitions: egui::epaint::text::FontDefinitions| {
+        let mut fonts = egui::epaint::text::Fonts::new(egui::epaint::text::TextOptions::default(), definitions);
+        stroke_weight(&mut fonts)
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let candidate = single("candidate", bytes, index);
+        let reference = FontDefinitions::default();
+        let (ours, theirs) = (weight(candidate), weight(reference));
+        theirs > 0.0 && (ours - theirs).abs() <= WEIGHT_SLACK * theirs
+    }))
+    .unwrap_or(false)
+}
+
+/// How much a font may differ from egui's own before it is drawn as bold beside it, as a fraction: a tenth, which the
+/// letter shapes' own hinting already moves, so that a font that differs only by rendering is not refused for it.
+const WEIGHT_SLACK: f32 = 0.10;
+
+/// The letters a stroke is measured across: uprights, rounds and the diagonal of a, at 28 pt.
+const STROKE_LETTERS: &str = "o e a n h u i l c t r";
+
+/// The mean width of the strokes of [`STROKE_LETTERS`], in texels: what the eye reads as a face's weight. The widest run
+/// of ink on the scanlines through the middle of each glyph, clear of a mark above it or a descender below.
+fn stroke_weight(fonts: &mut egui::epaint::text::Fonts) -> f32 {
+    let job = egui::epaint::text::LayoutJob::simple(
+        STROKE_LETTERS.to_owned(),
+        egui::FontId::proportional(28.0),
+        egui::Color32::WHITE,
+        f32::INFINITY,
+    );
+    let galley = fonts.with_pixels_per_point(1.0).layout_job(job);
+    let atlas = fonts.image();
+    let mut runs = Vec::new();
+    for row in &galley.rows {
+        for glyph in &row.glyphs {
+            let uv = glyph.uv_rect;
+            if uv.is_nothing() || glyph.chr == ' ' {
+                continue;
+            }
+            let (x0, x1) = (uv.min[0] as usize, uv.max[0] as usize);
+            let (y0, y1) = (uv.min[1] as usize, uv.max[1] as usize);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            for k in 1..=3 {
+                let y = y0 + (y1 - y0) * k / 4;
+                let (mut best, mut run) = (0usize, 0usize);
+                for x in x0..x1 {
+                    if atlas.pixels[y * atlas.size[0] + x].a() > 128 {
+                        run += 1;
+                        best = best.max(run);
+                    } else {
+                        run = 0;
+                    }
+                }
+                if best > 0 {
+                    runs.push(best as f32);
+                }
+            }
+        }
+    }
+    if runs.is_empty() { 0.0 } else { runs.iter().sum::<f32>() / runs.len() as f32 }
+}
+
+/// `bytes` as the font data the candidates are read through, so `font_covers` and `font_weighs_like` read it the same way.
+fn font(bytes: Vec<u8>, index: u32) -> FontData {
+    let mut data = FontData::from_owned(bytes);
+    data.index = index;
+    data
 }
 
 /// Tests have no say in which fonts a machine has: a window is told it has one.
@@ -584,7 +733,7 @@ const WORDS: &[[&str; 4]] = &[
         "Purge Unused (PU): take out the types, families and the rest nothing in the project uses; each category keeps a type",
         "Limpar não usados (PU): tira os tipos, famílias e o mais que nada no projeto usa; cada categoria mantém um tipo",
         "Purgar no usados (PU): quita los tipos, familias y lo demás que nada en el proyecto usa; cada categoría conserva un tipo",
-        "Dọn phần không dùng (PU): bỏ ra các loại, họ và những thứ còn lại mà không gì trong dự án dùng; mỗi loại giữ lại một kiểu",
+        "Dọn phần không dùng (PU): bỏ ra các loại, cấu kiện và những thứ còn lại mà không gì trong dự án dùng; mỗi loại giữ lại một kiểu",
     ],
     [
         "Takes out what nothing in the project uses. Each category keeps a type; Undo brings it back.",
@@ -1203,17 +1352,17 @@ const WORDS: &[[&str; 4]] = &[
         "Scale: the paper this view stands for, 1 : n of the model: its annotation and its line weights are that paper's",
         "Escala: o papel que esta vista representa, 1 : n do modelo: sua anotação e suas espessuras de linha são as desse papel",
         "Escala: el papel que esta vista representa, 1 : n del modelo: su anotación y sus grosores de línea son los de ese papel",
-        "Tỷ lệ: tờ giấy mà khung nhìn này đại diện, 1 : n của mô hình: ghi chú và trọng lượng nét của nó là của tờ giấy đó",
+        "Tỷ lệ: tờ giấy mà khung nhìn này đại diện, 1 : n của mô hình: ghi chú và độ dày nét của nó là của tờ giấy đó",
     ],
     ["Hairline", "Linha capilar", "Línea capilar", "Nét mảnh"],
-    ["Line Weights", "Espessuras de linha", "Grosores de línea", "Các trọng lượng nét"],
+    ["Line Weights", "Espessuras de linha", "Grosores de línea", "Độ dày nét"],
     [
         "Line Weights: what each pen draws on paper, the model's at each scale and the annotation's at any",
         "Espessuras de linha: o que cada pena desenha no papel, as do modelo em cada escala e as de anotação em qualquer uma",
         "Grosores de línea: lo que cada plumilla dibuja en el papel, las del modelo en cada escala y las de anotación en cualquiera",
-        "Trọng lượng nét: mỗi bút vẽ gì trên giấy, của mô hình ở mỗi tỷ lệ và của ghi chú ở mọi tỷ lệ",
+        "Độ dày nét: mỗi bút vẽ gì trên giấy, của mô hình ở mỗi tỷ lệ và của ghi chú ở mọi tỷ lệ",
     ],
-    ["Model Line Weights", "Espessuras de linha do modelo", "Grosores de línea del modelo", "Trọng lượng nét mô hình"],
+    ["Model Line Weights", "Espessuras de linha do modelo", "Grosores de línea del modelo", "Độ dày nét mô hình"],
     ["Object Styles", "Estilos de objeto", "Estilos de objeto", "Kiểu đối tượng"],
     [
         "Object Styles: the pen each category draws in, seen and cut, in every view",
@@ -1233,7 +1382,7 @@ const WORDS: &[[&str; 4]] = &[
         "Volver a las plumillas con las que empieza un proyecto",
         "Quay lại các bút mà một dự án khởi đầu",
     ],
-    ["Annotation Line Weights", "Espessuras de linha de anotação", "Grosores de línea de anotación", "Trọng lượng nét ghi chú"],
+    ["Annotation Line Weights", "Espessuras de linha de anotação", "Grosores de línea de anotación", "Độ dày nét ghi chú"],
     [
         "Each pen's width on paper, mm, in views at each scale: a view between two takes the nearer one's. Pen 0 is always a hairline.",
         "A largura de cada pena no papel, em mm, nas vistas em cada escala: uma vista entre duas usa a da mais próxima. A pena 0 é sempre uma linha capilar.",
@@ -1256,7 +1405,7 @@ const WORDS: &[[&str; 4]] = &[
         "Back to the line weights a project in these units starts with",
         "Voltar às espessuras de linha com que um projeto nestas unidades começa",
         "Volver a los grosores de línea con los que empieza un proyecto en estas unidades",
-        "Quay lại các trọng lượng nét mà một dự án theo các đơn vị này khởi đầu",
+        "Quay lại các độ dày nét mà một dự án theo các đơn vị này khởi đầu",
     ],
     ["Visual Style", "Estilo visual", "Estilo visual", "Kiểu hiển thị"],
     ["Shaded", "Sombreado", "Sombreado", "Có bóng"],
@@ -1516,7 +1665,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Depth", "Profundidade", "Profundidad", "Chiều sâu"],
     ["Yes", "Sim", "Sí", "Có"],
     ["No", "Não", "No", "Không"],
-    ["Family:", "Família:", "Familia:", "Họ:"],
+    ["Family:", "Família:", "Familia:", "Cấu kiện:"],
     ["Type:", "Tipo:", "Tipo:", "Loại:"],
     ["Duplicate…", "Duplicar…", "Duplicar…", "Nhân bản…"],
     ["New type", "Novo tipo", "Tipo nuevo", "Kiểu mới"],
@@ -1792,10 +1941,10 @@ const WORDS: &[[&str; 4]] = &[
         "Dây tiếp địa (GC): bấm vào điểm đầu và điểm cuối; một chuỗi lần bấm tạo vòng hoặc lưới, dưới cao độ",
     ],
     // The Data tab (lógica, dados e voz; NBR 14565).
-    ["Data", "Lógica, Dados e Voz", "Datos y Voz", "Dữ liệu"],
+    ["Data", "Lógica, Dados e Voz", "Datos y Voz", "Mạng"],
     ["Outlets & Equipment", "Pontos e equipamentos", "Puntos y equipos", "Ổ cắm & Thiết bị"],
     ["Cabling", "Cabeamento", "Cableado", "Hệ thống cáp"],
-    ["Place Data Outlet", "Inserir ponto de dados", "Colocar punto de datos", "Đặt ổ cắm dữ liệu"],
+    ["Place Data Outlet", "Inserir ponto de dados", "Colocar punto de datos", "Đặt ổ cắm mạng"],
     ["Place Voice Outlet", "Inserir ponto de voz", "Colocar punto de voz", "Đặt ổ cắm điện thoại"],
     ["Place Rack", "Inserir rack", "Colocar rack", "Đặt tủ rack"],
     ["Place Patch Panel", "Inserir patch panel", "Colocar panel de parcheo", "Đặt bảng đấu dây"],
@@ -1804,7 +1953,7 @@ const WORDS: &[[&str; 4]] = &[
         "Data Outlet (DT): a data point, where you click on the wall; Space turns it",
         "Ponto de dados (DT): um ponto de dados, onde você clicar na parede; Espaço gira",
         "Punto de datos (DT): un punto de datos, donde hagas clic en el muro; Espacio lo gira",
-        "Ổ cắm dữ liệu (DT): một điểm dữ liệu, tại nơi bạn bấm trên tường; Space để xoay",
+        "Ổ cắm mạng (DT): một điểm mạng, tại nơi bạn bấm trên tường; Space để xoay",
     ],
     [
         "Voice Outlet (VO): a telephone point, where you click on the wall; Space turns it",
@@ -1830,7 +1979,7 @@ const WORDS: &[[&str; 4]] = &[
         "Cableado (CB): haz clic en el inicio y el final; una cadena de clics hace un cable por tramo",
         "Cáp (CB): bấm vào điểm đầu và điểm cuối; một chuỗi lần bấm tạo một sợi cáp cho mỗi bước",
     ],
-    ["Data Outlets", "Pontos de dados", "Puntos de datos", "Ổ cắm dữ liệu"],
+    ["Data Outlets", "Pontos de dados", "Puntos de datos", "Ổ cắm mạng"],
     ["Voice Outlets", "Pontos de voz", "Puntos de voz", "Ổ cắm điện thoại"],
     ["Patch Panels", "Patch panels", "Paneles de parcheo", "Bảng đấu dây"],
     ["Racks", "Racks", "Racks", "Tủ rack"],
@@ -1889,7 +2038,7 @@ const WORDS: &[[&str; 4]] = &[
         "Trần: bấm vào bên trong một phòng để tạo trần tới các tường của nó",
     ],
     ["Opening", "Abertura", "Abertura", "Lỗ mở"],
-    ["Shaft", "Shaft", "Ducto", "Giếng kỹ thuật"],
+    ["Shaft", "Shaft", "Ducto", "Hộp gen"],
     [
         "Shaft Opening: click two opposite corners; it cuts the floors, ceilings and roofs it passes through",
         "Abertura de shaft: clique em dois cantos opostos; ela corta os pisos, forros e telhados por onde passa",
@@ -2124,12 +2273,12 @@ const WORDS: &[[&str; 4]] = &[
         "Cubierta por extrusión: haz clic en el inicio y el final de una línea y luego hasta dónde se extiende; su perfil sube desde la línea",
         "Mái theo trục: bấm vào điểm đầu và điểm cuối của một đường, rồi vào khoảng quét ngang; biên dạng của nó dựng lên từ đường đó",
     ],
-    ["Dormer", "Água-furtada", "Buhardilla", "Mái chó"],
+    ["Dormer", "Água-furtada", "Buhardilla", "Cửa sổ mái"],
     [
         "Dormer: click a roof's slope where its front wall goes; the roof opens under it",
         "Água-furtada: clique na água do telhado onde vai a parede da frente; o telhado se abre embaixo dela",
         "Buhardilla: haz clic en el faldón donde va su muro frontal; la cubierta se abre debajo",
-        "Mái chó: bấm vào một mặt dốc của mái tại nơi tường trước của nó đi; mái mở ra bên dưới nó",
+        "Cửa sổ mái: bấm vào một mặt dốc của mái tại nơi tường trước của nó đi; mái mở ra bên dưới nó",
     ],
     ["Gable Edge", "Borda de empena", "Borde de hastial", "Cạnh đầu hồi"],
     [
@@ -2162,7 +2311,7 @@ const WORDS: &[[&str; 4]] = &[
         "Click a roof's slope where the dormer's front wall goes, across the slope.",
         "Clique na água do telhado onde vai a parede da frente da água-furtada, atravessando a inclinação.",
         "Haz clic en el faldón donde va el muro frontal de la buhardilla, a lo ancho de la pendiente.",
-        "Bấm vào một mặt dốc của mái tại nơi tường trước của mái chó đi, ngang qua mặt dốc.",
+        "Bấm vào một mặt dốc của mái tại nơi tường trước của cửa sổ mái đi, ngang qua mặt dốc.",
     ],
     [
         "Click an edge of a roof's footprint: it stands upright, a gable end; click it again to slope it.",
@@ -2181,7 +2330,7 @@ const WORDS: &[[&str; 4]] = &[
         "dormer: the width `{}`, the height `{}` and the slope `{}` must be numbers",
         "água-furtada: a largura `{}`, a altura `{}` e a inclinação `{}` precisam ser números",
         "buhardilla: el ancho `{}`, la altura `{}` y la pendiente `{}` tienen que ser números",
-        "mái chó: chiều rộng `{}`, chiều cao `{}` và độ dốc `{}` phải là các số",
+        "cửa sổ mái: chiều rộng `{}`, chiều cao `{}` và độ dốc `{}` phải là các số",
     ],
     ["Extrusion Start", "Início da extrusão", "Inicio de extrusión", "Điểm đầu trục"],
     ["Extrusion End", "Fim da extrusão", "Fin de extrusión", "Điểm cuối trục"],
@@ -2192,7 +2341,7 @@ const WORDS: &[[&str; 4]] = &[
         "Component (CM): a family's type, where you click; Space turns it",
         "Componente (CM): um tipo de família, onde você clicar; Espaço o gira",
         "Componente (CM): un tipo de familia, donde haga clic; Espacio lo gira",
-        "Cấu kiện (CM): một kiểu của họ, tại nơi bạn bấm; Space để xoay",
+        "Cấu kiện (CM): một kiểu của cấu kiện, tại nơi bạn bấm; Space để xoay",
     ],
     ["Place Component", "Inserir componente", "Colocar componente", "Đặt cấu kiện"],
     [
@@ -2202,15 +2351,15 @@ const WORDS: &[[&str; 4]] = &[
         "Bấm vào nơi cấu kiện đi; Space để xoay nó một phần tư vòng.",
     ],
     ["Mode", "Modo", "Modo", "Chế độ"],
-    ["Load Family", "Carregar família", "Cargar familia", "Nạp họ"],
+    ["Load Family", "Carregar família", "Cargar familia", "Nạp cấu kiện"],
     [
         "Load Family: a family saved as a .json file, BIMCraft's own",
         "Carregar família: uma família salva como arquivo .json, do próprio BIMCraft",
         "Cargar familia: una familia guardada como archivo .json, propia de BIMCraft",
-        "Nạp họ: một họ được lưu thành tệp .json, của riêng BIMCraft",
+        "Nạp cấu kiện: một cấu kiện được lưu thành tệp .json, của riêng BIMCraft",
     ],
-    ["BIMCraft family", "Família do BIMCraft", "Familia de BIMCraft", "Họ BIMCraft"],
-    ["Families", "Famílias", "Familias", "Các họ"],
+    ["BIMCraft family", "Família do BIMCraft", "Familia de BIMCraft", "Cấu kiện BIMCraft"],
+    ["Families", "Famílias", "Familias", "Cấu kiện mẫu"],
     ["Materials and Finishes", "Materiais e acabamentos", "Materiales y acabados", "Vật liệu và lớp hoàn thiện"],
     ["Material:", "Material:", "Material:", "Vật liệu:"],
     [
@@ -2575,7 +2724,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Fill color", "Cor do preenchimento", "Color de relleno", "Màu tô"],
     ["Line color", "Cor da linha", "Color de línea", "Màu đường"],
     ["Line dash", "Tracejado da linha", "Guiones de línea", "Kiểu nét"],
-    ["Line weight", "Espessura da linha", "Grosor de línea", "Trọng lượng nét"],
+    ["Line weight", "Espessura da linha", "Grosor de línea", "Độ dày nét"],
     ["Filter Rules", "Regras do filtro", "Reglas del filtro", "Quy tắc lọc"],
     ["Filter:", "Filtro:", "Filtro:", "Bộ lọc:"],
     ["Filters", "Filtros", "Filtros", "Bộ lọc"],
@@ -2896,7 +3045,7 @@ const WORDS: &[[&str; 4]] = &[
         "Favorites: the materials and families you keep for every project; add one to this project with a click",
         "Favoritos: os materiais e as famílias que você guarda para todos os projetos; adicione um a este projeto com um clique",
         "Favoritos: los materiales y las familias que guarda para todos los proyectos; añada uno a este proyecto con un clic",
-        "Mục yêu thích: các vật liệu và họ bạn giữ cho mọi dự án; thêm một mục vào dự án này bằng một cú bấm",
+        "Mục yêu thích: các vật liệu và cấu kiện bạn giữ cho mọi dự án; thêm một mục vào dự án này bằng một cú bấm",
     ],
     ["Favorites…", "Favoritos…", "Favoritos…", "Mục yêu thích…"],
     [
@@ -2915,7 +3064,7 @@ const WORDS: &[[&str; 4]] = &[
         "No favorite families yet: save one from the Family Editor.",
         "Ainda não há famílias favoritas: guarde uma no Editor de Famílias.",
         "Todavía no hay familias favoritas: guarde una desde el Editor de familias.",
-        "Chưa có họ yêu thích nào: hãy lưu một họ từ Trình soạn họ.",
+        "Chưa có cấu kiện yêu thích nào: hãy lưu một cấu kiện từ Trình soạn cấu kiện.",
     ],
     ["No texture", "Sem textura", "Sin textura", "Không có họa tiết"],
     ["Add to Project", "Adicionar ao projeto", "Añadir al proyecto", "Thêm vào dự án"],
@@ -2947,29 +3096,29 @@ const WORDS: &[[&str; 4]] = &[
         "`{}` no es un tamaño, un ángulo ni un desplazamiento",
         "`{}` không phải là một cỡ, một góc hay một độ lệch",
     ],
-    ["Family Editor", "Editor de Famílias", "Editor de familias", "Trình soạn họ"],
-    ["New Family", "Nova família", "Nueva familia", "Họ mới"],
-    ["Edit Family", "Editar família", "Editar familia", "Sửa họ"],
+    ["Family Editor", "Editor de Famílias", "Editor de familias", "Trình soạn cấu kiện"],
+    ["New Family", "Nova família", "Nueva familia", "Cấu kiện mới"],
+    ["Edit Family", "Editar família", "Editar familia", "Sửa cấu kiện"],
     [
         "New Family: start a family of your own, of a category, to edit its parameters, types and forms",
         "Nova família: comece uma família sua, de uma categoria, para editar seus parâmetros, tipos e formas",
         "Nueva familia: empiece una familia propia, de una categoría, para editar sus parámetros, tipos y formas",
-        "Họ mới: bắt đầu một họ của riêng bạn, thuộc một loại, để sửa tham số, kiểu và hình khối của nó",
+        "Cấu kiện mới: bắt đầu một cấu kiện của riêng bạn, thuộc một loại, để sửa tham số, kiểu và hình khối của nó",
     ],
     [
         "Edit Family: the family of what is selected, or of the component being placed",
         "Editar família: a família do que está selecionado, ou do componente que se coloca",
         "Editar familia: la familia de lo seleccionado, o del componente que se coloca",
-        "Sửa họ: họ của thứ đang chọn, hoặc của cấu kiện đang được đặt",
+        "Sửa cấu kiện: cấu kiện của thứ đang chọn, hoặc của cấu kiện đang được đặt",
     ],
-    ["Family name", "Nome da família", "Nombre de la familia", "Tên họ"],
+    ["Family name", "Nome da família", "Nombre de la familia", "Tên cấu kiện"],
     ["Parameters", "Parâmetros", "Parámetros", "Các tham số"],
     ["Types", "Tipos", "Tipos", "Các kiểu"],
     ["Forms", "Formas", "Formas", "Hình khối"],
     ["Symbols", "Símbolos", "Símbolos", "Biểu tượng"],
     ["Furniture", "Mobiliário", "Mobiliario", "Nội thất"],
     ["Casework", "Marcenaria", "Carpintería", "Tủ kệ"],
-    ["Plumbing", "Hidrossanitário", "Fontanería", "Hệ cấp thoát nước"],
+    ["Plumbing", "Hidrossanitário", "Fontanería", "Cấp thoát nước"],
     ["Plumbing Fixtures", "Peças sanitárias", "Sanitarios", "Các thiết bị vệ sinh"],
     ["Lighting", "Iluminação", "Iluminación", "Chiếu sáng"],
     ["Generic", "Genérico", "Genérico", "Chung"],
@@ -2989,7 +3138,7 @@ const WORDS: &[[&str; 4]] = &[
         "A blank value is the family's own, as the Parameters tab has it.",
         "Um valor em branco é o da própria família, como a aba Parâmetros o tem.",
         "Un valor en blanco es el de la propia familia, tal como lo tiene la pestaña Parámetros.",
-        "Giá trị để trống là giá trị của chính họ, như thẻ Tham số có nó.",
+        "Giá trị để trống là giá trị của chính cấu kiện, như thẻ Tham số có nó.",
     ],
     [
         "A door or a window needs lengths named Width and Height; its formulas can read Wall Thickness, the wall's.",
@@ -3059,7 +3208,7 @@ const WORDS: &[[&str; 4]] = &[
         "Symbols are the lines a door's or a window's plan draws; this family isn't one.",
         "Símbolos são as linhas que a planta de uma porta ou janela desenha; esta família não é uma.",
         "Los símbolos son las líneas que dibuja la planta de una puerta o ventana; esta familia no es una.",
-        "Ký hiệu là các đường mà mặt bằng của một cửa đi hoặc cửa sổ vẽ; họ này không phải vậy.",
+        "Ký hiệu là các đường mà mặt bằng của một cửa đi hoặc cửa sổ vẽ; cấu kiện này không phải vậy.",
     ],
     ["Preview", "Pré-visualização", "Vista previa", "Xem trước"],
     ["Previewing", "Pré-visualizando", "Previsualizando", "Đang xem trước"],
@@ -3067,8 +3216,8 @@ const WORDS: &[[&str; 4]] = &[
     ["Drag the picture to turn it.", "Arraste a imagem para girá-la.", "Arrastre la imagen para girarla.", "Kéo hình để xoay nó."],
     ["Load Family…", "Carregar família…", "Cargar familia…", "Nạp họ…"],
     ["Save Family…", "Salvar família…", "Guardar familia…", "Lưu họ…"],
-    ["a family needs a name", "uma família precisa de um nome", "una familia necesita un nombre", "một họ cần có tên"],
-    ["a family needs a type", "uma família precisa de um tipo", "una familia necesita un tipo", "một họ cần có một kiểu"],
+    ["a family needs a name", "uma família precisa de um nome", "una familia necesita un nombre", "một cấu kiện cần có tên"],
+    ["a family needs a type", "uma família precisa de um tipo", "una familia necesita un tipo", "một cấu kiện cần có một kiểu"],
     [
         "corner {}: each corner is `x, y`",
         "vértice {}: cada vértice é `x, y`",
@@ -3164,7 +3313,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Copied {} IFC GlobalIds.", "{} GlobalIds IFC copiados.", "{} GlobalId IFC copiados.", "Đã sao chép {} GlobalId IFC."],
     ["material", "material", "material", "vật liệu"],
     ["picture", "imagem", "imagen", "ảnh"],
-    ["family", "família", "familia", "họ"],
+    ["family", "família", "familia", "cấu kiện"],
     ["parameter", "parâmetro", "parámetro", "tham số"],
     ["view filter", "filtro de vista", "filtro de vista", "bộ lọc khung nhìn"],
     ["view template", "modelo de vista", "plantilla de vista", "mẫu khung nhìn"],

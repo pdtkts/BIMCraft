@@ -116,3 +116,74 @@ fn a_font_is_taken_only_once_it_has_every_vietnamese_letter() {
     assert!(!lang::font_covers(b"not a font".to_vec(), 0, "a"));
     assert!(!lang::font_covers(vec![0u8; 64], 0, "a"));
 }
+
+/// A word's marked letters and its unmarked ones must be drawn by one face, or the marked ones look bold: the font goes in
+/// front of egui's own, so it owns the whole run. The fault this holds down had the font behind, and a window whose
+/// Vietnamese text was half Ubuntu-Light (which has no marks) and half the system's font, letter by letter.
+#[test]
+fn the_whole_word_is_drawn_by_one_face_and_not_only_its_marks() {
+    let mut h = app(BOX);
+    let ctx = h.ctx.clone();
+    h.state_mut().set_lang(&ctx, Lang::Vietnamese);
+    h.run();
+    if h.state().lang != Lang::Vietnamese {
+        return; // no font with the marks on this machine: the window says so and stays as it was
+    }
+    let owners = ctx.fonts_mut(|fonts| {
+        let mut font = fonts.fonts.font(&egui::FontFamily::Proportional);
+        let owner = font.characters().clone();
+        // A tone-marked ế among unmarked letters, as nearly every Vietnamese word has.
+        "Kiến trúc"
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .map(|c| owner.get(&c).and_then(|n| n.first()).cloned().unwrap_or_default())
+            .collect::<std::collections::BTreeSet<String>>()
+    });
+    assert_eq!(
+        owners.len(),
+        1,
+        "one face draws the whole word, not one per letter: {owners:?} — a second face draws the marked letters heavier"
+    );
+}
+
+/// The font the finder offers weighs what egui's own does, so a Vietnamese label is not a shade bolder than an English one.
+#[test]
+fn the_font_taken_weighs_what_egui_s_own_does() {
+    // Where the machine has no font with the marks at all, there is nothing to weigh; the window says so instead.
+    let Some((bytes, index)) = lang::vietnamese_font() else { return };
+    assert!(lang::font_weighs_like(bytes, index), "the font the finder offers weighs like egui's own, so nothing looks bold");
+    // And a face that is a third heavier is refused, which is the fault this holds down: Segoe UI, which covers the marks.
+    let heavy = std::fs::read(r"C:\Windows\Fonts\segoeui.ttf").ok();
+    if let Some(heavy) = heavy
+        && lang::font_covers(heavy.clone(), 0, lang::VIETNAMESE_LETTERS)
+    {
+        assert!(
+            !lang::font_weighs_like(heavy, 0),
+            "Segoe UI covers the marks and is a third heavier; taken, every Vietnamese word would look bold"
+        );
+    }
+    // Bytes that are not a font: refused, no panic.
+    assert!(!lang::font_weighs_like(Vec::new(), 0));
+    assert!(!lang::font_weighs_like(b"not a font".to_vec(), 0));
+}
+
+/// A Vietnamese label must be the same size as an English one beside it: the font the finder takes draws its letters at
+/// the height egui's own draws them. The fault this holds down had the finder take Calibri Light for its weight alone,
+/// and the window's text shrank (its x-height is 6 texels at 13 pt against Ubuntu-Light's 7) whenever it was put in
+/// Vietnamese.
+#[test]
+fn the_font_taken_draws_its_letters_at_the_size_egui_s_own_does() {
+    let Some((bytes, index)) = lang::vietnamese_font() else { return };
+    assert!(lang::font_draws_the_same_size(bytes, index), "the font the finder offers is the size of egui's own, so nothing shrinks");
+    // A face that draws smaller is refused, which is the fault this holds down: Calibri Light, right weight and all.
+    let light = std::fs::read(r"C:\Windows\Fonts\calibril.ttf").ok();
+    if let Some(light) = light
+        && lang::font_covers(light.clone(), 0, lang::VIETNAMESE_LETTERS)
+        && lang::font_weighs_like(light.clone(), 0)
+    {
+        assert!(!lang::font_draws_the_same_size(light, 0), "Calibri Light weighs right and draws smaller; taken, the window would shrink");
+    }
+    // Bytes that are not a font: refused, no panic.
+    assert!(!lang::font_draws_the_same_size(Vec::new(), 0));
+    assert!(!lang::font_draws_the_same_size(b"not a font".to_vec(), 0));
+}

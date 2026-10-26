@@ -255,16 +255,16 @@ pub fn category(category: &str, several: bool) -> String {
     let (one, many) = match category {
         "wall" => (["Wall", "Parede", "Muro", "Tường"], ["Walls", "Paredes", "Muros", "Tường"]),
         "door" => (["Door", "Porta", "Puerta", "Cửa đi"], ["Doors", "Portas", "Puertas", "Cửa đi"]),
-        "window" => (["Window", "Janela", "Ventana", "Cửa sổ"], ["Windows", "Janelas", "Ventanas", "Các cửa sổ"]),
+        "window" => (["Window", "Janela", "Ventana", "Cửa sổ"], ["Windows", "Janelas", "Ventanas", "Cửa sổ"]),
         "floor" => (["Floor", "Piso", "Piso", "Sàn"], ["Floors", "Pisos", "Pisos", "Sàn"]),
         "room" => (["Room", "Ambiente", "Habitación", "Phòng"], ["Rooms", "Ambientes", "Habitaciones", "Phòng"]),
         "level" => (["Level", "Nível", "Nivel", "Cao độ"], ["Levels", "Níveis", "Niveles", "Cao độ"]),
         "grid" => (["Grid", "Eixo", "Eje", "Trục"], ["Grids", "Eixos", "Ejes", "Trục"]),
-        "dimension" => (["Dimension", "Cota", "Cota", "Kích thước"], ["Dimensions", "Cotas", "Cotas", "Các kích thước"]),
+        "dimension" => (["Dimension", "Cota", "Cota", "Kích thước"], ["Dimensions", "Cotas", "Cotas", "Kích thước"]),
         "tag" => (["Tag", "Identificador", "Etiqueta", "Nhãn"], ["Tags", "Identificadores", "Etiquetas", "Nhãn"]),
         "section" => (["Section", "Corte", "Sección", "Mặt cắt"], ["Sections", "Cortes", "Secciones", "Mặt cắt"]),
         "elevation" => (["Elevation", "Elevação", "Elevación", "Mặt đứng"], ["Elevations", "Elevações", "Elevaciones", "Mặt đứng"]),
-        "sheet" => (["Sheet", "Folha", "Plano", "Bản vẽ"], ["Sheets", "Folhas", "Planos", "Các bản vẽ"]),
+        "sheet" => (["Sheet", "Folha", "Plano", "Bản vẽ"], ["Sheets", "Folhas", "Planos", "Bản vẽ"]),
         "viewport" => (
             ["Viewport", "Janela de vista", "Vista en plano", "Khung nhìn"],
             ["Viewports", "Janelas de vista", "Vistas en plano", "Khung nhìn"],
@@ -283,7 +283,7 @@ pub fn category(category: &str, several: bool) -> String {
             (["Mass Floor", "Piso de massa", "Piso de masa", "Sàn khối"], ["Mass Floors", "Pisos de massa", "Pisos de masa", "Sàn khối"])
         }
         "ramp" => (["Ramp", "Rampa", "Rampa", "Dốc"], ["Ramps", "Rampas", "Rampas", "Dốc"]),
-        "railing" => (["Railing", "Guarda-corpo", "Barandal", "Lan can"], ["Railings", "Guarda-corpos", "Barandales", "Các lan can"]),
+        "railing" => (["Railing", "Guarda-corpo", "Barandal", "Lan can"], ["Railings", "Guarda-corpos", "Barandales", "Lan can"]),
         "beam" => (["Beam", "Viga", "Viga", "Dầm"], ["Beams", "Vigas", "Vigas", "Dầm"]),
         "structuralcolumn" => (
             ["Structural Column", "Pilar estrutural", "Columna estructural", "Cột kết cấu"],
@@ -319,8 +319,8 @@ pub fn category(category: &str, several: bool) -> String {
             ["Spot Elevation", "Elevação de ponto", "Cota de nivel", "Cao độ điểm"],
             ["Spot Elevations", "Elevações de ponto", "Cotas de nivel", "Cao độ điểm"],
         ),
-        "schedule" => (["Schedule", "Tabela", "Tabla", "Bảng thống kê"], ["Schedules", "Tabelas", "Tablas", "Các bảng thống kê"]),
-        "view3d" => (["3D View", "Vista 3D", "Vista 3D", "Khung nhìn 3D"], ["3D Views", "Vistas 3D", "Vistas 3D", "Các khung nhìn 3D"]),
+        "schedule" => (["Schedule", "Tabela", "Tabla", "Bảng thống kê"], ["Schedules", "Tabelas", "Tablas", "Bảng thống kê"]),
+        "view3d" => (["3D View", "Vista 3D", "Vista 3D", "Khung nhìn 3D"], ["3D Views", "Vistas 3D", "Vistas 3D", "Khung nhìn 3D"]),
         "link" => (
             ["Linked Model", "Modelo vinculado", "Modelo vinculado", "Mô hình liên kết"],
             ["Linked Models", "Modelos vinculados", "Modelos vinculados", "Mô hình liên kết"],
@@ -384,7 +384,7 @@ const WORDS: &[[&str; 4]] = &[
     // The ribbon's tabs and the File menu.
     ["File", "Arquivo", "Archivo", "Tệp"],
     ["Architecture", "Arquitetura", "Arquitectura", "Kiến trúc"],
-    ["Annotate", "Anotar", "Anotar", "Ghi chú"],
+    ["Annotate", "Anotar", "Anotar", "Chú thích"],
     ["View", "Vista", "Vista", "Khung nhìn"],
     ["Manage", "Gerenciar", "Gestionar", "Quản lý"],
     ["Modify", "Modificar", "Modificar", "Sửa"],
@@ -425,7 +425,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Graphics", "Gráficos", "Gráficos", "Đồ họa"],
     ["Create", "Criar", "Crear", "Tạo"],
     ["Sheet Composition", "Composição de folha", "Composición de planos", "Bố cục bản vẽ"],
-    ["Windows", "Janelas", "Ventanas", "Các cửa sổ"],
+    ["Windows", "Janelas", "Ventanas", "Cửa sổ"],
     ["Settings", "Configurações", "Configuración", "Cài đặt"],
     ["Properties", "Propriedades", "Propiedades", "Thuộc tính"],
     // Tools and their tips.
@@ -616,7 +616,7 @@ const WORDS: &[[&str; 4]] = &[
         "Elevación: haz clic junto al edificio, en el lado que quieres ver",
         "Mặt đứng: bấm bên cạnh công trình, ở phía cần nhìn",
     ],
-    ["Schedules", "Tabelas", "Tablas", "Các bảng thống kê"],
+    ["Schedules", "Tabelas", "Tablas", "Bảng thống kê"],
     ["Open a schedule", "Abrir uma tabela", "Abrir una tabla", "Mở một bảng thống kê"],
     ["Sheet", "Folha", "Plano", "Bản vẽ"],
     ["A new sheet, with a title block", "Uma nova folha, com carimbo", "Un plano nuevo, con cajetín", "Một bản vẽ mới, kèm khung tên"],
@@ -667,7 +667,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Centimetres", "Centímetros", "Centímetros", "Xentimét"],
     ["Metres", "Metros", "Metros", "Mét"],
     ["Inches", "Polegadas", "Pulgadas", "Inch"],
-    ["Feet", "Pés", "Pies", "Feet"],
+    ["Feet", "Pés", "Pies", "Bộ"],
     ["Feet and inches", "Pés e polegadas", "Pies y pulgadas", "Feet và inch"],
     [
         "Properties (PP): show or hide the palette",
@@ -1431,7 +1431,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Project Browser · {}", "Navegador de projeto · {}", "Navegador de proyectos · {}", "Trình duyệt dự án · {}"],
     ["Views (all)", "Vistas (todas)", "Vistas (todas)", "Khung nhìn (tất cả)"],
     ["Floor Plans", "Plantas de piso", "Plantas", "Các mặt bằng"],
-    ["3D Views", "Vistas 3D", "Vistas 3D", "Các khung nhìn 3D"],
+    ["3D Views", "Vistas 3D", "Vistas 3D", "Khung nhìn 3D"],
     [
         "Elevations (Building Elevation)",
         "Elevações (elevação da construção)",
@@ -1457,7 +1457,7 @@ const WORDS: &[[&str; 4]] = &[
     ["New {}", "Inserir: {}", "Colocar: {}", "{} mới"],
     ["{} ({})", "{} ({})", "{} ({})", "{} ({})"],
     ["Constraints", "Restrições", "Restricciones", "Các ràng buộc"],
-    ["Dimensions", "Dimensões", "Dimensiones", "Các kích thước"],
+    ["Dimensions", "Dimensões", "Dimensiones", "Kích thước"],
     ["Identity Data", "Dados de identidade", "Datos de identidad", "Dữ liệu nhận dạng"],
     ["Other", "Outros", "Otros", "Khác"],
     ["Extents", "Extensões", "Extensión", "Phạm vi"],
@@ -1483,7 +1483,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Rotation (°)", "Rotação (°)", "Rotación (°)", "Xoay (°)"],
     ["Host", "Hospedeiro", "Anfitrión", "Chủ"],
     ["View Name", "Nome da vista", "Nombre de la vista", "Tên khung nhìn"],
-    ["Category", "Categoria", "Categoría", "Loại"],
+    ["Category", "Categoria", "Categoría", "Phân loại"],
     ["Azimuth (°)", "Azimute (°)", "Acimut (°)", "Phương vị (°)"],
     ["Elevation (°)", "Elevação (°)", "Elevación (°)", "Độ cao (°)"],
     ["Leader Line", "Linha de chamada", "Directriz", "Đường dẫn nhãn"],
@@ -1618,14 +1618,14 @@ const WORDS: &[[&str; 4]] = &[
     ["Insert Layer", "Inserir camada", "Insertar capa", "Chèn lớp"],
     ["Structure", "Estrutura", "Estructura", "Kết cấu"],
     ["Substrate", "Substrato", "Sustrato", "Lớp nền"],
-    ["Thermal", "Térmica", "Térmica", "Cách nhiệt"],
+    ["Thermal", "Térmica", "Térmica", "Chịu nhiệt"],
     ["Membrane", "Membrana", "Membrana", "Màng chống thấm"],
     ["Finish", "Acabamento", "Acabado", "Hoàn thiện"],
     // Floors, ceilings and shafts.
     ["Floor", "Piso", "Piso", "Sàn"],
     // The Structure tab: its panels, tools, Options Bars, prompts and Properties.
     ["Structure", "Estrutura", "Estructura", "Kết cấu"],
-    ["Foundation", "Fundação", "Cimentación", "Móng"],
+    ["Foundation", "Fundação", "Cimentación", "Nền móng"],
     ["Beam", "Viga", "Viga", "Dầm"],
     ["Floor: Structural", "Laje estrutural", "Losa estructural", "Sàn: Kết cấu"],
     ["Isolated Footing", "Sapata isolada", "Zapata aislada", "Móng đơn"],
@@ -1889,7 +1889,7 @@ const WORDS: &[[&str; 4]] = &[
         "Trần: bấm vào bên trong một phòng để tạo trần tới các tường của nó",
     ],
     ["Opening", "Abertura", "Abertura", "Lỗ mở"],
-    ["Shaft", "Shaft", "Ducto", "Lỗ mở kỹ thuật"],
+    ["Shaft", "Shaft", "Ducto", "Giếng kỹ thuật"],
     [
         "Shaft Opening: click two opposite corners; it cuts the floors, ceilings and roofs it passes through",
         "Abertura de shaft: clique em dois cantos opostos; ela corta os pisos, forros e telhados por onde passa",
@@ -2044,7 +2044,7 @@ const WORDS: &[[&str; 4]] = &[
     // Stairs, ramps and railings.
     ["Ramp", "Rampa", "Rampa", "Dốc"],
     ["Railing", "Guarda-corpo", "Barandal", "Lan can"],
-    ["Railings", "Guarda-corpos", "Barandales", "Các lan can"],
+    ["Railings", "Guarda-corpos", "Barandales", "Lan can"],
     [
         "Stair: click where it starts, then where its run ends; a landing turns it",
         "Escada: clique onde ela começa e depois onde o lance termina; um patamar a faz virar",
@@ -2856,7 +2856,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Picture…", "Imagem…", "Imagen…", "Ảnh…"],
     ["Picture", "Imagem", "Imagen", "Ảnh"],
     ["Pictures", "Imagens", "Imágenes", "Các ảnh"],
-    ["Block", "Bloco", "Bloque", "Khối"],
+    ["Block", "Bloco", "Bloque", "Khối ký hiệu"],
     ["Boards", "Tábuas", "Tablas", "Ván"],
     ["Tile", "Ladrilho", "Baldosa", "Ô"],
     ["Tile Width", "Largura do ladrilho", "Ancho de la baldosa", "Chiều rộng ô"],
@@ -2889,7 +2889,7 @@ const WORDS: &[[&str; 4]] = &[
     ["Parameters", "Parâmetros", "Parámetros", "Các tham số"],
     ["Types", "Tipos", "Tipos", "Các kiểu"],
     ["Forms", "Formas", "Formas", "Hình khối"],
-    ["Symbols", "Símbolos", "Símbolos", "Ký hiệu"],
+    ["Symbols", "Símbolos", "Símbolos", "Biểu tượng"],
     ["Furniture", "Mobiliário", "Mobiliario", "Nội thất"],
     ["Casework", "Marcenaria", "Carpintería", "Tủ kệ"],
     ["Plumbing", "Hidrossanitário", "Fontanería", "Hệ cấp thoát nước"],
@@ -3208,7 +3208,7 @@ const WORDS: &[[&str; 4]] = &[
         "Esta copia no tiene una tarjeta gráfica en la que dibujar la vista 3D",
         "Bản này không có card đồ họa nào để vẽ khung nhìn 3D",
     ],
-    ["Card: {}", "Placa: {}", "Tarjeta: {}", "Card: {}"],
+    ["Card: {}", "Placa: {}", "Tarjeta: {}", "Card đồ hoạ: {}"],
     [
         "The 3D view is drawn on the processor: {}",
         "A vista 3D é desenhada no processador: {}",
@@ -3242,7 +3242,7 @@ const WORDS: &[[&str; 4]] = &[
     ["All", "Tudo", "Todo", "Tất cả"],
     ["List {}", "Listar {}", "Listar {}", "Liệt kê {}"],
     ["Views", "Vistas", "Vistas", "Các khung nhìn"],
-    ["Sheets", "Folhas", "Planos", "Các bản vẽ"],
+    ["Sheets", "Folhas", "Planos", "Bản vẽ"],
     ["Legends", "Legendas", "Leyendas", "Chú thích"],
     ["Search…", "Pesquisar…", "Buscar…", "Tìm…"],
     [

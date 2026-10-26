@@ -18,7 +18,7 @@ fn the_window_speaks_vietnamese_once_it_is_put_in_it_and_keeps_to_it() {
     h.state_mut().set_lang(&ctx, Lang::Vietnamese);
     h.run();
     assert!(h.state().lang == Lang::Vietnamese, "the window is {:?}, status: {:?}", h.state().lang, h.state().status);
-    for word in ["Kiến trúc", "Ghi chú", "Khung nhìn", "Quản lý", "Sửa"] {
+    for word in ["Kiến trúc", "Chú thích", "Khung nhìn", "Quản lý", "Sửa"] {
         assert!(h.query_all_by_label(word).next().is_some(), "the ribbon's tab `{word}`");
     }
     assert!(h.query_by_label("Architecture").is_none());

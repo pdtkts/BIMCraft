@@ -357,8 +357,8 @@ pub fn use_chinese_font(ctx: &Context, find: FontFinder) -> bool {
     let Some((bytes, index)) = find(Lang::Chinese) else { return false };
     let mut data = FontData::from_owned(bytes);
     data.index = index;
-    let family = |family| InsertFontFamily { family, priority: FontPriority::Lowest };
-    ctx.add_font(FontInsert::new("chinese", data, vec![family(FontFamily::Proportional), family(FontFamily::Monospace)]));
+    let families = crate::style::families().map(|family| InsertFontFamily { family, priority: FontPriority::Lowest });
+    ctx.add_font(FontInsert::new("chinese", data, families.into()));
     ctx.data_mut(|d| d.insert_temp(Id::new("chinese-font"), true));
     true
 }
@@ -691,10 +691,10 @@ const WORDS: &[[&str; 4]] = &[
     ],
     ["Dark Mode", "Modo escuro", "Modo oscuro", "Chế độ tối"],
     [
-        "Dark Mode: the window and the views light on dark; sheets stay paper. It starts as your system's theme",
-        "Modo escuro: a janela e as vistas claras sobre fundo escuro; as folhas continuam papel. Começa no tema do sistema",
-        "Modo oscuro: la ventana y las vistas, claras sobre oscuro; los planos siguen siendo papel. Empieza con el tema del sistema",
-        "Chế độ tối: cửa sổ và các khung nhìn sáng trên nền tối; bản vẽ vẫn nền giấy. Nó khởi đầu theo chủ đề của hệ thống",
+        "Choose a theme, including a dark interface with a light canvas",
+        "Escolha um tema, incluindo uma interface escura com uma tela clara",
+        "Elija un tema, incluida una interfaz oscura con un lienzo claro",
+        "Chọn một chủ đề, kể cả giao diện tối với khung vẽ sáng",
     ],
     ["Crop View", "Recortar vista", "Recortar vista", "Cắt khung nhìn"],
     ["Duplicate View", "Duplicar vista", "Duplicar vista", "Nhân bản khung nhìn"],
@@ -1347,6 +1347,18 @@ const WORDS: &[[&str; 4]] = &[
         "Uma vista sempre tem uma escala",
         "Una vista siempre tiene una escala",
         "Một khung nhìn luôn có một tỷ lệ",
+    ],
+    [
+        "High Contrast Point Clouds",
+        "Nuvens de pontos em alto contraste",
+        "Nubes de puntos en alto contraste",
+        "Đám mây điểm tương phản cao",
+    ],
+    [
+        "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; again for their own colours. A scan given a colour of its own in Visibility/Graphics keeps it.",
+        "Nuvens de pontos em alto contraste: desenha as nuvens desta vista em uma só cor forte, para que se leia o que mostram; de novo para as suas próprias cores. Uma nuvem com cor própria em Visibilidade/Gráficos a mantém.",
+        "Nubes de puntos en alto contraste: dibuja las nubes de esta vista en un solo color intenso, para que se lea lo que muestran; otra vez para sus propios colores. Una nube con color propio en Visibilidad/Gráficos lo conserva.",
+        "Đám mây điểm tương phản cao: vẽ đám mây điểm của khung nhìn này bằng một màu mạnh, để thấy rõ chúng thể hiện gì; bấm lần nữa để trả lại màu riêng. Đám mây điểm đã có màu riêng trong Hiển thị/Đồ họa thì giữ nguyên.",
     ],
     [
         "Scale: the paper this view stands for, 1 : n of the model: its annotation and its line weights are that paper's",
@@ -3357,6 +3369,22 @@ const WORDS: &[[&str; 4]] = &[
     ["As the System", "Como o sistema", "Como el sistema", "Theo hệ thống"],
     ["Light", "Claro", "Claro", "Sáng"],
     ["Dark", "Escuro", "Oscuro", "Tối"],
+    ["Dark UI, Light Canvas", "Interface escura, tela clara", "Interfaz oscura, lienzo claro", "Giao diện tối, khung vẽ sáng"],
+    ["Layout", "Disposição", "Disposición", "Bố cục"],
+    ["Floating", "Flutuante", "Flotante", "Nổi"],
+    ["Compact", "Compacta", "Compacta", "Gọn"],
+    [
+        "The ribbon, the palettes and the bars as cards floating over the view",
+        "A faixa de opções, as paletas e as barras como cartões flutuando sobre a vista",
+        "La cinta de opciones, las paletas y las barras como tarjetas flotando sobre la vista",
+        "Dải lệnh, các bảng và các thanh là thẻ nổi trên khung nhìn",
+    ],
+    [
+        "The ribbon, the palettes and the bars flush to the window's edges",
+        "A faixa de opções, as paletas e as barras rentes às bordas da janela",
+        "La cinta de opciones, las paletas y las barras pegadas a los bordes de la ventana",
+        "Dải lệnh, các bảng và các thanh sát mép cửa sổ",
+    ],
     ["Ribbon", "Faixa de opções", "Cinta de opciones", "Dải lệnh"],
     [
         "Minimize the ribbon to its tabs",
@@ -3371,6 +3399,22 @@ const WORDS: &[[&str; 4]] = &[
         "Bấm đúp vào tên một thẻ cũng vậy; sau đó bấm vào một thẻ sẽ hiện các công cụ của nó cho tới khi một công cụ được chọn",
     ],
     ["Palettes", "Paletas", "Paletas", "Các bảng"],
+    ["Minimize", "Minimizar", "Minimizar", "Thu nhỏ"],
+    ["Maximize", "Maximizar", "Maximizar", "Phóng to"],
+    ["Restore Down", "Restaurar tamanho", "Restaurar", "Khôi phục xuống"],
+    ["Title bar", "Barra de título", "Barra de título", "Thanh tiêu đề"],
+    [
+        "Use the system's title bar",
+        "Usar a barra de título do sistema",
+        "Usar la barra de título del sistema",
+        "Dùng thanh tiêu đề của hệ thống",
+    ],
+    [
+        "The system's own title bar and frame, rather than the window's: the app bar then sits under it",
+        "A barra de título e a moldura do próprio sistema, em vez das da janela: a barra do aplicativo fica então abaixo dela",
+        "La barra de título y el marco del propio sistema, en lugar de los de la ventana: la barra de la aplicación queda debajo",
+        "Thanh tiêu đề và khung của chính hệ thống, thay vì của cửa sổ: thanh ứng dụng nằm dưới nó",
+    ],
     ["Reset Palette Layout", "Redefinir a disposição das paletas", "Restablecer la disposición de las paletas", "Đặt lại bố cục bảng"],
     [
         "Properties over the Project Browser, on the left, as at first",
@@ -3448,6 +3492,14 @@ const WORDS: &[[&str; 4]] = &[
         "Card đồ họa không vẽ được khung nhìn 3D ({}): nó được vẽ trên vi xử lý",
     ],
     ["Selection colour", "Cor da seleção", "Color de la selección", "Màu phần đang chọn"],
+    ["High contrast colour", "Cor de alto contraste", "Color de alto contraste", "Màu tương phản cao"],
+    ["Reset Colour", "Redefinir cor", "Restablecer color", "Đặt lại màu"],
+    [
+        "What High Contrast Point Clouds, on the view control bar, draws a view's scans in",
+        "A cor em que Nuvens de pontos em alto contraste, na barra de controle da vista, desenha as nuvens de uma vista",
+        "El color en que Nubes de puntos en alto contraste, en la barra de control de vista, dibuja las nubes de una vista",
+        "Màu mà Đám mây điểm tương phản cao, trên thanh điều khiển khung nhìn, dùng để vẽ đám mây điểm của một khung nhìn",
+    ],
     [
         "Highlight what's under the cursor",
         "Destacar o que está sob o cursor",

@@ -13,6 +13,8 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
   `lang/zh.rs` (Chinese, English key and the Chinese: a row it lacks shows in English);
   `nothing_a_translated_interface_shows_is_left_in_english` fails for a label the
   table knows that the window forgot to translate, in every language. The core's messages stay English, because agents read them.
+- **A ribbon tool that drops choices down** goes through `ribbon::choices(ui, &response, open, content)`, not `Popup::menu`: the
+  tool may be a row in its panel's list, where a popup of its own would close the list (egui keeps one popup open).
 - **A palette or a window** that docks or floats goes through `dock.rs`; settings the user keeps go in `settings.rs`
   (`settings.json`), never in a project.
 - **The 3D view has two painters**: the core's software picture and the card's (`gpu.rs`, `gpu.wgsl`; the design is in
@@ -29,4 +31,6 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
 - Traps: `press("X")` panics when two nodes carry the label (a ribbon tab and a button; a palette and a window): check
   `h.state()` or set the state; a status box in the view's corner can lie over a modal's buttons, so a modal says its errors
   inside itself; a field inside a `Grid` comes out narrow, so use `ui.add_sized`.
-- After a change to how the window looks, look at it in both themes: [looking at the result](../../docs/areas/looking-at-results.md).
+- A texture's pixels (the 3D view's picture, a section's) are not in the context, and the harness hands each frame's uploads to a renderer
+  that keeps none: `tests/light_canvas.rs`'s `Uploads` is one that does (`Harness::builder().renderer(..)`).
+- After a change to how the window looks, look at it in the three looks (Light, Dark, Dark UI with a Light Canvas): [looking at the result](../../docs/areas/looking-at-results.md).

@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
-use crate::style::pal;
+use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Sheet, Status, Tool, icon_button, top_params};
 
 /// How near the cursor an element is picked, in px.
@@ -308,7 +308,7 @@ impl Canvas {
 /// A drawing's colour on screen: as drawn, or in the dark theme with its lightness turned over,
 /// so ink reads light on a dark ground and the grid stays blue.
 pub(crate) fn color(c: Rgb) -> Color32 {
-    if !crate::style::dark() {
+    if !crate::style::canvas_dark() {
         return Color32::from_rgb(c.0, c.1, c.2);
     }
     let (r, g, b) = (i32::from(c.0), i32::from(c.1), i32::from(c.2));
@@ -366,8 +366,8 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
     let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
     for (prim, owner) in d.prims.iter().zip(&d.owners) {
         let accent = match *owner {
-            Some(id) if selected.contains(&id) => Some((pal().accent, pal().select_fill)),
-            Some(id) if Some(id) == hovered => Some((pal().hover, pal().hover_fill)),
+            Some(id) if selected.contains(&id) => Some((pal().accent, canvas_pal().select_fill)),
+            Some(id) if Some(id) == hovered => Some((pal().hover, canvas_pal().hover_fill)),
             _ => None,
         };
         match prim {
@@ -395,12 +395,12 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
                     }
                 }
             }
-            Prim::Image { at: corner, width, height, .. } => {
+            Prim::Image { at: corner, width, height, ink, .. } => {
                 if let Some(texture) = pictures.next() {
                     let rect = Rect::from_min_size(at.pos(*corner), vec2(*width as f32, *height as f32) * at.k);
                     // On a dark canvas a plan's picture (a scan's) is dimmed, so the ink lightened over it still reads; a sheet's
-                    // paper stays white.
-                    let plain = if !at.paper && crate::style::dark() { Color32::from_gray(120) } else { Color32::WHITE };
+                    // paper stays white, and so does a scan the view fills with a colour of its own, which is ink itself.
+                    let plain = if !at.paper && !*ink && crate::style::canvas_dark() { Color32::from_gray(120) } else { Color32::WHITE };
                     let tint = accent.map_or(plain, |a| a.1);
                     p.image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint);
                 }
@@ -1048,7 +1048,7 @@ impl BimApp {
 
     /// The navigation bar of view `id`, at its top right as in Revit: fit, zoom in, zoom out.
     pub(crate) fn nav_bar(&mut self, ui: &mut Ui, rect: Rect, id: Id) {
-        let bar = Rect::from_min_size(rect.right_top() + vec2(-46.0, 14.0), vec2(32.0, 80.0));
+        let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 80.0));
         ui.painter_at(rect).rect(bar, 6.0, pal().surface, Stroke::new(1.0, pal().border), StrokeKind::Inside);
         ui.scope_builder(UiBuilder::new().max_rect(bar.shrink(3.0)).layout(Layout::top_down(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
@@ -1098,7 +1098,7 @@ impl BimApp {
         }
         let [lo, hi] = shown;
         let ring = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(at).to_vec();
-        let mut shapes = vec![Shape::closed_line(ring, Stroke::new(1.0, if held.is_some() { pal().accent } else { pal().muted }))];
+        let mut shapes = vec![Shape::closed_line(ring, Stroke::new(1.0, if held.is_some() { pal().accent } else { canvas_pal().muted }))];
         if modify {
             for g in geom::edge_grips(shown) {
                 let r = Rect::from_center_size(at(g), vec2(9.0, 9.0));

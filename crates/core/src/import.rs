@@ -9,6 +9,8 @@
 //! What BIMCraft has no element for, or what breaks one of its rules, is left out and listed.
 //! Phases and design options come back from the property sets BIMCraft writes them in, `ifc::PHASING`.
 
+use bimcraft_i18n::{msg, ui_msg};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::f64::consts::PI;
 use std::sync::Arc;
@@ -20,8 +22,8 @@ use crate::library::Kind;
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
     Landing, Layer, Level, MAX_COORD, MAX_LAYERS, MAX_POINTS, MAX_PROJECT_PARAMETERS, MAX_TEXT, Mass, Model, Opening, OpeningType,
-    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Roof, RoofType, Room, Run, RunType, Shaft, Side,
-    Stair, TOL, Wall, WallType, culprit, heading,
+    PARAMETER_CATEGORIES, ParameterKind, ProjectParameter, Railing, RailingType, Ramp, Roof, RoofType, Room, RoomSeparator, Run, RunType,
+    Shaft, Side, Stair, TOL, Wall, WallType, culprit, heading,
 };
 use crate::phasing;
 use crate::stairs;
@@ -992,10 +994,10 @@ fn layers_of(r: &Reader, l: &Links, id: u64, t: f64) -> Vec<Layer> {
             let function = match text(x.args.get(5)) {
                 _ if thickness == 0.0 => Function::Membrane,
                 Some("LoadBearing") => Function::Structure,
-                Some("Insulation") => Function::Thermal,
-                Some("Finish") => Function::Finish,
-                Some("Substrate") => Function::Substrate,
-                Some("Membrane") => Function::Membrane,
+                Some(msg!("Insulation")) => Function::Thermal,
+                Some(ui_msg!("Finish")) => Function::Finish,
+                Some(ui_msg!("Substrate")) => Function::Substrate,
+                Some(msg!("Membrane")) => Function::Membrane,
                 _ => Function::Substrate,
             };
             Layer {
@@ -2291,6 +2293,27 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
         from.insert(rid, who(id));
         origin.entry(id).or_insert(rid);
         elements_from.entry(id).or_default().push(rid);
+    }
+
+    // Room separation lines: virtual elements BIMCraft wrote, a line per segment of their axis.
+    for id in named(&["IFCVIRTUALELEMENT"]) {
+        let Some(x) = e(id).filter(|x| text(x.args.get(4)) == Some(crate::ifc::SEPARATION)) else { continue };
+        seen.insert(id);
+        let Some(axis) = r.axis(x).filter(|a| a.len() >= 2) else {
+            leave(&mut skipped, &mut seen, id, "its room separation line has no axis");
+            continue;
+        };
+        let level = level_for(id, axis.first().map_or(0.0, |p| p[2]));
+        for w in axis.windows(2) {
+            let (start, end) = (micron(r.flat(w[0])), micron(r.flat(w[1])));
+            if start.dist(end) <= TOL {
+                continue;
+            }
+            let sid = m.insert(Element::RoomSeparator(RoomSeparator { level, start, end }));
+            from.insert(sid, who(id));
+            origin.entry(id).or_insert(sid);
+            elements_from.entry(id).or_default().push(sid);
+        }
     }
 
     // Doors and windows: where their openings cut their walls.

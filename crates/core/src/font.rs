@@ -294,9 +294,10 @@ mod tests {
         assert!(missing.is_empty(), "the lettering draws a question mark for {missing:?}");
         // And every letter the core's own words use is among them, so a new word's letter cannot slip through.
         let unknown = strokes("@", 0.0, 0.0, 12.0);
-        let words: Vec<char> = crate::language::Language::ALL
+        let words: Vec<char> = crate::language::CATALOGS
             .iter()
-            .flat_map(|&l| crate::language::WORDS.iter().map(move |w| l.word(w[0])))
+            .filter(|(code, _)| *code != "en")
+            .flat_map(|(_, messages)| messages.iter().map(|(_, _, t)| *t))
             .flat_map(str::chars)
             .filter(|c| !c.is_ascii() && c.is_alphabetic())
             .filter(|&c| strokes(&c.to_string(), 0.0, 0.0, 12.0) == unknown)

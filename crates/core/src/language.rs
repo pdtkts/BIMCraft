@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+include!(concat!(env!("OUT_DIR"), "/catalogs.rs"));
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Language {
     #[default]
@@ -63,7 +65,7 @@ impl Language {
         if self == Language::English {
             return None;
         }
-        WORDS.iter().find(|w| w[0] == english).map(|&w| self.of(w))
+        bimcraft_i18n::translated(CATALOGS, self.code(), "", english)
     }
 
     /// Which of `options` (English words) `name` is, in English or in this language.
@@ -72,162 +74,6 @@ impl Language {
         options.iter().copied().find(|o| o.eq_ignore_ascii_case(name) || self.word(o).to_lowercase() == name.to_lowercase())
     }
 }
-
-/// The core's words in English, Brazilian Portuguese, Spanish and Vietnamese.
-pub(crate) const WORDS: &[[&str; 4]] = &[
-    // The line patterns and line styles a project starts with.
-    ["Dash", "Tracejado", "Trazos", "Nét"],
-    ["Long Dash", "Traço longo", "Trazo largo", "Nét dài"],
-    ["Dot", "Pontilhado", "Puntos", "Điểm"],
-    ["Dash Dot", "Traço e ponto", "Trazo y punto", "Nét và điểm"],
-    ["Hidden", "Oculta", "Oculta", "Khuất"],
-    ["Centre", "Eixo", "Eje", "Tâm"],
-    ["Hairline", "Linha capilar", "Línea capilar", "Nét mảnh"],
-    ["Thin Lines", "Linhas finas", "Líneas finas", "Nét mảnh"],
-    ["Medium Lines", "Linhas médias", "Líneas medias", "Nét vừa"],
-    ["Wide Lines", "Linhas grossas", "Líneas gruesas", "Nét đậm"],
-    ["Hidden Lines", "Linhas ocultas", "Líneas ocultas", "Nét khuất"],
-    ["Solid fill", "Preenchimento sólido", "Relleno sólido", "Tô đặc"],
-    ["Diagonal Up", "Diagonal para cima", "Diagonal ascendente", "Chéo lên"],
-    ["Diagonal Down", "Diagonal para baixo", "Diagonal descendente", "Chéo xuống"],
-    ["Diagonal Crosshatch", "Hachura cruzada diagonal", "Sombreado cruzado diagonal", "Hoa văn chéo"],
-    ["Crosshatch", "Hachura cruzada", "Sombreado cruzado", "Hoa văn chéo"],
-    ["Horizontal", "Horizontal", "Horizontal", "Ngang"],
-    ["Vertical", "Vertical", "Vertical", "Dọc"],
-    ["Sand", "Areia", "Arena", "Cát"],
-    ["Brick 225 x 75", "Tijolo 225 x 75", "Ladrillo 225 x 75", "Gạch 225 x 75"],
-    ["Tile 300", "Ladrilho 300", "Baldosa 300", "Gạch lát 300"],
-    ["Solid Black", "Preto sólido", "Negro sólido", "Đen đặc"],
-    ["Masking", "Máscara", "Máscara", "Che"],
-    ["Centre Lines", "Linhas de eixo", "Líneas de eje", "Đường tâm"],
-    ["Overhead Lines", "Linhas superiores", "Líneas superiores", "Đường phía trên"],
-    // Phases and the phase filters a project starts with.
-    ["Existing", "Existente", "Existente", "Hiện hữu"],
-    ["New Construction", "Nova construção", "Nueva construcción", "Xây mới"],
-    ["Show All", "Mostrar tudo", "Mostrar todo", "Hiển thị tất cả"],
-    ["Show Complete", "Mostrar completo", "Mostrar completo", "Hiển thị hoàn chỉnh"],
-    ["Show New", "Mostrar novo", "Mostrar nuevo", "Hiển thị mới"],
-    ["Show Previous + Demolished", "Mostrar anterior + demolido", "Mostrar anterior + demolido", "Hiển thị trước + đã phá dỡ"],
-    ["Show Previous + New", "Mostrar anterior + novo", "Mostrar anterior + nuevo", "Hiển thị trước + mới"],
-    // Names commands give.
-    ["Project", "Projeto", "Proyecto", "Dự án"],
-    ["Level", "Nível", "Nivel", "Cao độ"],
-    ["Section", "Corte", "Sección", "Mặt cắt"],
-    ["Elevation", "Elevação", "Elevación", "Mặt đứng"],
-    ["North", "Norte", "Norte", "Bắc"],
-    ["South", "Sul", "Sur", "Nam"],
-    ["East", "Leste", "Este", "Đông"],
-    ["West", "Oeste", "Oeste", "Tây"],
-    ["Unnamed", "Sem nome", "Sin nombre", "Chưa đặt tên"],
-    ["Room", "Ambiente", "Habitación", "Phòng"],
-    ["Mass", "Massa", "Masa", "Khối"],
-    ["Room Schedule", "Tabela de ambientes", "Tabla de habitaciones", "Bảng thống kê phòng"],
-    ["Door Schedule", "Tabela de portas", "Tabla de puertas", "Bảng thống kê cửa đi"],
-    ["Window Schedule", "Tabela de janelas", "Tabla de ventanas", "Bảng thống kê cửa sổ"],
-    ["Wall Schedule", "Tabela de paredes", "Tabla de muros", "Bảng thống kê tường"],
-    ["Floor Schedule", "Tabela de pisos", "Tabla de pisos", "Bảng thống kê sàn"],
-    ["Level Schedule", "Tabela de níveis", "Tabla de niveles", "Bảng thống kê cao độ"],
-    ["Ceiling Plan", "Planta de forro", "Plano de cielo raso", "Mặt bằng trần"],
-    ["Copy", "Cópia", "Copia", "Bản sao"],
-    ["Dependent", "Dependente", "Dependiente", "Phụ thuộc"],
-    // The materials library a new project has.
-    ["Brick", "Tijolo", "Ladrillo", "Gạch"],
-    ["Insulation", "Isolamento", "Aislamiento", "Cách nhiệt"],
-    ["Concrete block", "Bloco de concreto", "Bloque de hormigón", "Gạch bê tông"],
-    ["Plaster", "Reboco", "Enlucido", "Vữa trát"],
-    ["Concrete", "Concreto", "Hormigón", "Bê tông"],
-    ["Screed", "Contrapiso", "Recrecido", "Vữa lót"],
-    ["Timber", "Madeira", "Madera", "Gỗ"],
-    ["Gypsum board", "Placa de gesso", "Placa de yeso", "Tấm thạch cao"],
-    ["Ceramic tile", "Cerâmica", "Baldosa cerámica", "Gạch ceramic"],
-    ["Roof tiles", "Telhas", "Tejas", "Ngói"],
-    ["Membrane", "Manta impermeável", "Lámina impermeable", "Màng chống thấm"],
-    ["Fabric", "Tecido", "Tela", "Vải"],
-    ["Porcelain", "Porcelana", "Porcelana", "Sứ"],
-    // The families a project starts with, and their parameters.
-    ["Table", "Mesa", "Mesa", "Bàn"],
-    ["Chair", "Cadeira", "Silla", "Ghế"],
-    ["Bed", "Cama", "Cama", "Giường"],
-    ["Sofa", "Sofá", "Sofá", "Ghế sofa"],
-    ["Desk", "Escrivaninha", "Escritorio", "Bàn làm việc"],
-    ["Wardrobe", "Guarda-roupa", "Armario", "Tủ quần áo"],
-    ["Base Cabinet", "Armário inferior", "Mueble bajo", "Tủ dưới"],
-    ["WC", "Vaso sanitário", "Inodoro", "Bồn cầu"],
-    ["Washbasin", "Lavatório", "Lavabo", "Chậu rửa mặt"],
-    ["Bathtub", "Banheira", "Bañera", "Bồn tắm"],
-    // The fixtures of the discipline tabs.
-    ["Kitchen Sink", "Pia de cozinha", "Fregadero de cocina", "Bồn rửa bát"],
-    ["Shower", "Chuveiro", "Ducha", "Sen tắm"],
-    ["Floor Drain", "Ralo", "Sumidero de piso", "Phễu thu sàn"],
-    ["Elbow 90", "Joelho 90", "Codo 90", "Cút 90"],
-    ["Tee", "Tê", "Te", "Tê"],
-    ["Gate Valve", "Registro de gaveta", "Válvula de compuerta", "Van cửa"],
-    ["Diameter", "Diâmetro", "Diámetro", "Đường kính"],
-    ["Distribution Board", "Quadro de distribuição", "Cuadro de distribución", "Tủ điện"],
-    ["Ceiling Luminaire", "Luminária de teto", "Luminaria de techo", "Đèn trần"],
-    ["Recessed Luminaire", "Luminária embutida", "Luminaria empotrada", "Đèn âm trần"],
-    ["Outlet", "Tomada", "Tomacorriente", "Ổ cắm"],
-    ["Switch", "Interruptor", "Interruptor", "Công tắc"],
-    ["Mounting Height", "Altura de instalação", "Altura de montaje", "Cao độ lắp đặt"],
-    ["Air Terminal", "Captor", "Terminal aéreo", "Kim thu sét"],
-    ["Earthing Electrode", "Haste de aterramento", "Electrodo de puesta a tierra", "Cọc tiếp địa"],
-    ["Inspection Box", "Caixa de inspeção", "Caja de inspección", "Hộp kiểm tra"],
-    ["Data Outlet", "Ponto de dados", "Punto de datos", "Ổ cắm mạng"],
-    ["Voice Outlet", "Ponto de voz", "Punto de voz", "Ổ cắm điện thoại"],
-    ["Patch Panel", "Patch panel", "Panel de parcheo", "Bảng đấu dây"],
-    ["Rack", "Rack", "Rack", "Tủ rack"],
-    ["Single Door", "Porta simples", "Puerta simple", "Cửa đơn"],
-    ["Double Door", "Porta dupla", "Puerta doble", "Cửa đôi"],
-    ["Fixed Window", "Janela fixa", "Ventana fija", "Cửa sổ cố định"],
-    ["Casement Window", "Janela de abrir", "Ventana abatible", "Cửa sổ mở"],
-    ["Frame Width", "Largura do batente", "Ancho del marco", "Chiều rộng khung"],
-    ["Frame Depth", "Profundidade do batente", "Profundidad del marco", "Chiều sâu khung"],
-    ["Frame Material", "Material do batente", "Material del marco", "Vật liệu khung"],
-    ["Leaf Material", "Material da folha", "Material de la hoja", "Vật liệu cánh"],
-    ["Leaf Thickness", "Espessura da folha", "Espesor de la hoja", "Độ dày cánh"],
-    ["Glass", "Vidro", "Vidrio", "Kính"],
-    ["Metal", "Metal", "Metal", "Kim loại"],
-    ["PVC", "PVC", "PVC", "PVC"],
-    ["Copper", "Cobre", "Cobre", "Đồng"],
-    ["Depth", "Profundidade", "Profundidad", "Chiều sâu"],
-    ["Seat Height", "Altura do assento", "Altura del asiento", "Chiều cao mặt ngồi"],
-    ["Leg Width", "Largura da perna", "Ancho de la pata", "Chiều rộng chân"],
-    ["Arm Width", "Largura do braço", "Ancho del brazo", "Chiều rộng tay vịn"],
-    ["Headboard Height", "Altura da cabeceira", "Altura del cabecero", "Chiều cao đầu giường"],
-    ["Worktop", "Bancada", "Encimera", "Mặt bàn"],
-    // What drawings print.
-    ["UP", "SOBE", "SUBE", "LÊN"],
-    ["DN", "DESCE", "BAJA", "XUỐNG"],
-    ["NOT ENCLOSED", "NÃO DELIMITADO", "NO DELIMITADA", "CHƯA KHÉP KÍN"],
-    ["SCALE", "ESCALA", "ESCALA", "TỶ LỆ"],
-    ["SCALE AS INDICATED", "ESCALA CONFORME INDICADO", "ESCALA SEGÚN SE INDICA", "TỶ LỆ NHƯ GHI"],
-    // Schedule headings.
-    ["Number", "Número", "Número", "Số"],
-    ["Name", "Nome", "Nombre", "Tên"],
-    ["Mark", "Marca", "Marca", "Ký hiệu"],
-    ["Type", "Tipo", "Tipo", "Loại"],
-    ["Width", "Largura", "Ancho", "Chiều rộng"],
-    ["Height", "Altura", "Altura", "Chiều cao"],
-    ["Sill", "Peitoril", "Antepecho", "Ngưỡng"],
-    ["Wall", "Parede", "Muro", "Tường"],
-    ["Length", "Comprimento", "Longitud", "Chiều dài"],
-    ["Thickness", "Espessura", "Espesor", "Độ dày"],
-    ["Area", "Área", "Área", "Diện tích"],
-    ["Perimeter", "Perímetro", "Perímetro", "Chu vi"],
-    ["Volume", "Volume", "Volumen", "Thể tích"],
-    ["Gross Floor Area", "Área bruta de piso", "Superficie bruta de planta", "Tổng diện tích sàn"],
-    ["Count", "Contagem", "Recuento", "Số lượng"],
-    ["Family", "Família", "Familia", "Họ"],
-    ["Offset", "Deslocamento", "Desfase", "Độ lệch"],
-    ["Slope", "Inclinação", "Pendiente", "Độ dốc"],
-    ["Plan Area", "Área em planta", "Área en planta", "Diện tích mặt bằng"],
-    ["Risers", "Espelhos", "Contrahuellas", "Số bậc"],
-    ["Riser Height", "Altura do espelho", "Altura de contrahuella", "Chiều cao bậc"],
-    ["Tread", "Piso", "Huella", "Mặt bậc"],
-    ["Total", "Total", "Total", "Tổng"],
-    ["Yes", "Sim", "Sí", "Có"],
-    ["No", "Não", "No", "Không"],
-];
 
 #[cfg(test)]
 mod tests {

@@ -236,20 +236,31 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
             _ => None,
         })),
     };
+    // Where they meet is asked first: whether they overlap in height takes both walls' heights, under any roof or floor
+    // they're attached to.
     for (other, o) in candidates {
-        if other == id || !stacked(m, w, o) {
+        if other == id {
             continue;
         }
         if o.start.dist(node) <= TOL {
-            arms.push(arm(m, o, false, false));
+            if stacked(m, w, o) {
+                arms.push(arm(m, o, false, false));
+            }
         } else if o.end.dist(node) <= TOL {
-            arms.push(arm(m, o, true, false));
+            if stacked(m, w, o) {
+                arms.push(arm(m, o, true, false));
+            }
         } else {
             // A wall it ends on: the node within its thickness, between its ends.
             let ax = Axis::of(o);
             let (s, across) = ax.project(node);
             let (ext, int) = faces(m, o);
-            if s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(node, across) <= TOL {
+            if s > TOL
+                && s < ax.length() - TOL
+                && (int - TOL..=ext + TOL).contains(&across)
+                && ax.distance(node, across) <= TOL
+                && stacked(m, w, o)
+            {
                 let (t, (e, i), c) = (ax.tangent(s), (ax.at(s, ext), ax.at(s, int)), ax.at(s, (ext + int) / 2.0));
                 arms.push(Arm { mine: false, way: t, ccw: e, cw: i, centre: c, thick: ext - int });
                 arms.push(Arm { mine: false, way: t * -1.0, ccw: i, cw: e, centre: c, thick: ext - int });
@@ -263,8 +274,9 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
 
 /// The corner points that close wall `id`'s start, or with `at_end`, its end: from its face on the
 /// clockwise side of the way it leaves the node round to the other. Walls ending where it ends meet
-/// it at any angle, their faces running on until they cross (no farther behind the node than the
-/// thickest is thick: past that, the end is square); a wall it ends on stops it at its face. Where
+/// it at any angle, their faces running on until they cross (no farther from the node than the
+/// thickest is thick, either way: past that, the end is square); a wall it ends on stops it at its
+/// face. Where
 /// three or more walls meet, the node itself fills between them.
 pub fn cap(m: &Model, id: Id, at_end: bool) -> Vec<P2> {
     cap_in(m, id, at_end, None)
@@ -280,11 +292,12 @@ fn cap_in(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> Vec<P2> {
         return vec![me.cw, me.ccw];
     }
     let node = if at_end { w.end } else { w.start };
-    let (len, limit) = (Axis::of(w).length(), arms.iter().map(|a| a.thick).fold(0.0, f64::max));
-    // Where a face of this wall crosses a neighbour's facing face, near enough; else its own end.
+    let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
+    // Where a face of this wall crosses a neighbour's facing face, near enough to the node either way; else its own
+    // end. A crossing far along the wall is no corner at all: two walls meeting at a shallow angle cross metres in.
     let meet = |face: P2, other: P2, other_way: P2| {
         geom::line_intersection(face, face + me.way, other, other + other_way)
-            .filter(|c| (-limit..=len).contains(&(*c - node).dot(me.way)))
+            .filter(|c| (-limit..=limit).contains(&(*c - node).dot(me.way)))
             .unwrap_or(face)
     };
     let (cw, ccw) = (meet(me.cw, prev.ccw, prev.way), meet(me.ccw, next.cw, next.way));
@@ -485,9 +498,18 @@ pub(crate) fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
     geom::triangulate(&ccw).into_iter().map(|t| t.iter().filter_map(|i| ccw.get(*i).copied()).collect()).collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The polygons cut by [`split`] on this thread: the tests of what is drawn assert on it, not on time, which varies with the
+    /// load of the machine.
+    pub(crate) static SPLITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `ring` cut by the convex counter-clockwise `piece`: the part inside it (if any), and the parts
 /// outside, apart. A repeated point of the piece's is no edge to cut by.
 pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
+    #[cfg(test)]
+    SPLITS.with(|n| n.set(n.get() + 1));
     let big = |r: &Vec<P2>| r.len() >= 3 && geom::area(r).abs() > 1.0;
     let mut inside = ring;
     let mut outside = Vec::new();
@@ -504,10 +526,31 @@ pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2
 
 /// What's left of `rings` outside `hole`: convex pieces, counter-clockwise.
 pub(crate) fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
-    let holes = convex_pieces(hole);
+    // The box round a ring: a piece clear of the hole's piece's box is left whole, without cutting it (a big concave ring and
+    // a big concave hole make hundreds of pieces each, and cutting each by each is cubic).
+    let extent = |ring: &[P2]| {
+        ring.iter().fold((P2(f64::INFINITY, f64::INFINITY), P2(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), q| {
+            (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))
+        })
+    };
+    let holes: Vec<_> = convex_pieces(hole).into_iter().map(|p| (extent(&p), p)).collect();
     rings
         .iter()
-        .flat_map(|r| holes.iter().fold(convex_pieces(r), |parts, piece| parts.into_iter().flat_map(|p| split(p, piece).1).collect()))
+        .flat_map(|r| {
+            holes.iter().fold(convex_pieces(r), |parts, ((lo, hi), piece)| {
+                parts
+                    .into_iter()
+                    .flat_map(|p| {
+                        let (a, b) = extent(&p);
+                        if b.0 < lo.0 || a.0 > hi.0 || b.1 < lo.1 || a.1 > hi.1 {
+                            Some(p).filter(|p| p.len() >= 3 && geom::area(p).abs() > 1.0).into_iter().collect::<Vec<_>>()
+                        } else {
+                            split(p, piece).1
+                        }
+                    })
+                    .collect()
+            })
+        })
         .collect()
 }
 
@@ -696,6 +739,17 @@ mod tests {
         // Outside the corner the faces would cross 5.7 thicknesses back: the end goes square there.
         assert!(o.iter().all(|p| p.length() < 700.0 || p.length() > 3000.0), "{o:?}");
         assert!(o.iter().any(|p| near(*p, P2(-20f64.to_radians().sin(), 20f64.to_radians().cos()) * 100.0)), "{o:?}");
+    }
+
+    #[test]
+    fn walls_meeting_at_a_shallow_angle_square_off_rather_than_run_on_metres() {
+        // 7.5° apart: their faces would cross 1.5 m along each wall, which is no corner but a wedge. A wall's end goes
+        // square instead, no farther from the node than the thickest wall there is thick.
+        let s = corner(7.5);
+        for id in [100002, 100003] {
+            let o = outline(&s.model, id);
+            assert!(o.iter().all(|p| p.length() < 300.0 || p.length() > 3000.0), "{id}: {o:?}");
+        }
     }
 
     #[test]

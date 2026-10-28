@@ -822,6 +822,14 @@ fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     assert_eq!(h.state().session.model.units.name(), "ft-in");
     // Any two letters do something exactly when the dialog lists them, and it names each in every language.
     let listed: Vec<&str> = crate::shortcuts().iter().map(|(letters, _)| *letters).collect();
+    // One key, one thing: a fixture's (the Plumbing Fixture's PX, once Explode's too) or an alias that a desktop key
+    // takes first would be listed twice and reach only the first.
+    let mut seen = std::collections::BTreeMap::new();
+    for (letters, name) in crate::shortcuts() {
+        if let Some(other) = seen.insert(letters, name) {
+            assert_eq!(letters, "CL", "{letters} is both {other} and {name}");
+        }
+    }
     for a in 'A'..='Z' {
         for b in 'A'..='Z' {
             let mut app = BimApp::new(Session::new());
@@ -884,7 +892,7 @@ fn ma_gives_the_walls_selected_after_the_first_its_type_in_one_undo_step() {
 
 #[test]
 fn keys_for_tools_bimcraft_lacks_are_bound_to_nothing_rather_than_to_another_tool() {
-    for keys in ["SU", "DL", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
+    for keys in ["SU", "LI", "SF", "BR", "BS", "RN", "RP", "CV", "TF", "DA", "FD"] {
         let mut app = BimApp::new(Session::new());
         app.typed = keys.into();
         assert!(!app.shortcut(), "{keys}");
@@ -1150,16 +1158,56 @@ fn a_selected_doors_temporary_dimensions_set_where_it_stands() {
     let door = ids(&h, "door")[0];
     click(&mut h, P2(2000.0, 0.0));
     assert_eq!(h.state().selection, [door]);
-    // From each end of its wall to the middle of the door.
-    assert!(h.query_by_label("Temporary dimension 2000").is_some());
-    h.get_by_label("Temporary dimension 6000").click();
+    // From the inner face of each wall at the ends of its wall (200 thick, on their centre lines) to the middle of the door.
+    assert!(h.query_by_label("Temporary dimension 1900").is_some());
+    h.get_by_label("Temporary dimension 5900").click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.event(Event::Text("5000".into()));
     h.run();
     key(&mut h, Key::Enter);
-    assert_eq!(field(&h, door, "offset"), json!(3000.0), "5000 from the far end");
-    assert!(h.query_by_label("Temporary dimension 3000").is_some());
+    assert_eq!(field(&h, door, "offset"), json!(2900.0), "5000 from the far wall's face");
+    assert!(h.query_by_label("Temporary dimension 2800").is_some());
+}
+
+#[test]
+fn a_doors_temporary_dimensions_stop_at_the_face_of_a_wall_crossing_its_wall() {
+    let mut h =
+        app(&format!("{BOX}\nwall {{\"points\": [[5000, 0], [5000, 6000]], \"type\": \"Interior - 100mm\"}}\ndoor {{\"at\": [2000, 0]}}"));
+    let door = ids(&h, "door")[0];
+    click(&mut h, P2(2000.0, 0.0));
+    assert_eq!(h.state().selection, [door]);
+    // 100 to 4950, the faces either side: 1900 and 2950.
+    assert!(h.query_by_label("Temporary dimension 2950").is_some());
+    retype_dimension(&mut h, "1900", "2400");
+    assert_eq!(field(&h, door, "offset"), json!(2500.0), "2400 from the west wall's face");
+    assert!(h.query_by_label("Temporary dimension 2450").is_some(), "the rest of the 4850 between the faces");
+    // Past a face is off its stretch of wall: nothing moves.
+    let steps = h.state().session.history().len();
+    retype_dimension(&mut h, "2400", "6000");
+    assert_eq!(h.state().session.history().len(), steps);
+    assert!(h.state().status.error);
+}
+
+#[test]
+fn a_door_placed_or_dragged_near_the_middle_between_the_faces_snaps_to_it() {
+    let mut h = app(&format!("{BOX}\nwall {{\"points\": [[5000, 0], [5000, 6000]], \"type\": \"Interior - 100mm\"}}"));
+    // Between the faces at 100 and 4950 the middle is 2525.
+    shortcut(&mut h, "DR");
+    click(&mut h, P2(2560.0, 0.0));
+    click(&mut h, P2(1000.0, 6000.0));
+    let doors = ids(&h, "door");
+    assert_eq!(field(&h, doors[0], "offset"), json!(2525.0), "snapped to the middle");
+    // The north wall runs west from 8000: x 1000 is 7000 along it, between faces at 3050 and 7900.
+    assert_eq!(field(&h, doors[1], "offset"), json!(7000.0), "far from it, where it was put");
+    // Dragged: to near the middle, x 2525, then on past it.
+    key(&mut h, Key::Escape);
+    click(&mut h, P2(1000.0, 6000.0));
+    drag(&mut h, P2(1000.0, 6000.0), P2(2490.0, 6000.0));
+    assert_eq!(field(&h, doors[1], "offset"), json!(5475.0));
+    drag(&mut h, P2(2525.0, 6000.0), P2(3500.0, 6000.0));
+    let offset = field(&h, doors[1], "offset").as_f64().unwrap();
+    assert!((offset - 4500.0).abs() < 10.0, "free again, as far as a pixel lets the drag say: {offset}");
 }
 
 /// Click the number of a temporary dimension and type another.
@@ -1447,11 +1495,12 @@ fn the_door_and_window_tools_sketch_what_a_click_would_put_in_the_wall() {
     for label in ["Door", "Window"] {
         let mut h = app(BOX);
         tool(&mut h, label);
-        // Over the south wall, 3 m from its start: 3000 to one end and 5000 to the other, where the opening would be.
+        // Over the south wall, 3 m from its start: 2900 to the west wall's face and 4900 to the east wall's, where the
+        // opening would be.
         h.hover_at(h.state().screen(P2(3000.0, 0.0)));
         h.run();
         let text = painted_text(&h);
-        assert!(text.contains(&"3000".to_string()) && text.contains(&"5000".to_string()), "{label}: {text:?}");
+        assert!(text.contains(&"2900".to_string()) && text.contains(&"4900".to_string()), "{label}: {text:?}");
         assert!(
             h.state().session.model.elements.values().all(|e| !matches!(e, Element::Door(_) | Element::Window(_))),
             "a sketch isn't an element"
@@ -1459,7 +1508,7 @@ fn the_door_and_window_tools_sketch_what_a_click_would_put_in_the_wall() {
         // In the middle of the room there's no wall to put it in.
         h.hover_at(h.state().screen(P2(4000.0, 3000.0)));
         h.run();
-        assert!(!painted_text(&h).contains(&"3000".to_string()), "{label}");
+        assert!(!painted_text(&h).contains(&"2900".to_string()), "{label}");
     }
 }
 
@@ -1472,7 +1521,7 @@ fn a_door_pointed_at_a_wall_shows_how_far_it_stands_from_the_ends() {
     let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
     let v = bimcraft_core::render::View { scale: 0.06, cx: 4000.0, cy: 3000.0, width: 800, height: 600 };
     let spans: Vec<String> = crate::canvas::opening_dimensions(&painter, &m, &v, o).into_iter().map(|(_, text, _)| text).collect();
-    assert_eq!(spans, ["2000", "6000"]);
+    assert_eq!(spans, ["1900", "5900"]);
 }
 
 #[test]
@@ -1553,8 +1602,14 @@ fn the_palette_keeps_its_fields_and_apply_inside_it_whatever_their_labels() {
     assert_eq!(panel.width(), 290.0, "the palette at its default width");
     // Height Offset From Level is a long label.
     let fields = h.query_all(By::new().predicate(|n| matches!(n.role(), Role::TextInput | Role::ComboBox)));
+    // The palette scrolls, and a floor's has rows enough to run past its foot: only its width is the question.
     for n in fields.filter(|n| n.rect().intersects(panel)).chain([h.get_by_label("Apply")]) {
-        assert!(panel.contains_rect(n.rect()), "{:?} at {:?} runs out of the palette, {panel:?}", n.accesskit_node().label(), n.rect());
+        let r = n.rect();
+        assert!(
+            r.min.x >= panel.min.x && r.max.x <= panel.max.x,
+            "{:?} at {r:?} runs out of the palette, {panel:?}",
+            n.accesskit_node().label()
+        );
     }
 }
 
@@ -2437,6 +2492,11 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
     // Wide enough for every tab's tools in the longest language: a narrower window hands some over to their panel's list.
     h.set_size(vec2(1800.0, 900.0));
     h.run();
+    // A detail group to place and repeat, so the detail tools' Options Bars have one to name.
+    let s = &mut h.state_mut().session;
+    let line = s.execute("detail_line", &json!({"start": [1000, 1000], "end": [2000, 1000]})).unwrap();
+    s.execute("create_group", &json!({"ids": [line["id"]]})).unwrap();
+    h.run();
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
     for l in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::Chinese] {
@@ -2575,9 +2635,45 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         shortcut(&mut h, "VT");
         missed.extend(english(&h, l));
         press(&mut h, tr("Close"));
+        // The detail tools' Options Bars, with a group to place; Linework with its choices.
+        for tool in ["Detail Group", "Repeating Detail", "Revision Cloud", "Insulation"] {
+            key(&mut h, Key::Escape);
+            press(&mut h, tr("Annotate"));
+            press(&mut h, tr(tool));
+            missed.extend(english(&h, l));
+        }
+        key(&mut h, Key::Escape);
+        topmost(&mut h, tr("Modify"));
+        press(&mut h, tr("Linework"));
+        missed.extend(english(&h, l));
+        key(&mut h, Key::Escape);
+        // Manage > Fill Patterns on both tabs, with a pattern's families; Line Styles on both; Edit Type of a region being sketched.
+        press(&mut h, tr("Manage"));
+        press(&mut h, tr("Fill Patterns"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        press(&mut h, &tr("{}: Edit Lines").replace("{}", "Sand"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Line Styles"));
+        missed.extend(english(&h, l));
+        topmost(&mut h, tr("Patterns"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        shortcut(&mut h, "FR");
+        press(&mut h, tr("Edit Type"));
+        missed.extend(english(&h, l));
+        press(&mut h, tr("Cancel"));
+        press(&mut h, tr("Cancel Edit Mode"));
         click(&mut h, P2(5000.0, 0.0));
         missed.extend(english(&h, l));
         key(&mut h, Key::Escape);
+        // The names of the project's own patterns, types and styles are in the project's language, English here, whatever the
+        // interface speaks (`language.rs` knows them, for a project that starts in another).
+        let m = &h.state().session.model;
+        let own: Vec<&String> =
+            m.fill_patterns.keys().chain(m.line_patterns.keys()).chain(m.region_types.keys()).chain(m.line_styles.keys()).collect();
+        missed.retain(|s| !own.contains(&s));
         missed.sort();
         missed.dedup();
         assert!(missed.is_empty(), "{l:?}: left in English: {missed:?}");
@@ -5092,20 +5188,28 @@ mod clouds;
 mod control;
 mod dialog;
 mod dock;
+mod draw;
+mod fills;
 mod fonts;
 mod gpu;
+mod groups;
 mod light_canvas;
+mod lines;
 mod lineweights;
 mod links;
 mod look;
 mod mep;
 mod objectstyles;
+mod patterns;
 mod planviews;
 mod purge;
 mod revit;
+mod section_box;
+mod sketch;
 mod smallest;
 mod start;
 mod titlebar;
+mod tools;
 mod vietnamese;
 mod window;
 

@@ -75,6 +75,32 @@ impl Language {
 
 /// The core's words in English, Brazilian Portuguese, Spanish and Vietnamese.
 pub(crate) const WORDS: &[[&str; 4]] = &[
+    // The line patterns and line styles a project starts with.
+    ["Dash", "Tracejado", "Trazos", "Nét"],
+    ["Long Dash", "Traço longo", "Trazo largo", "Nét dài"],
+    ["Dot", "Pontilhado", "Puntos", "Điểm"],
+    ["Dash Dot", "Traço e ponto", "Trazo y punto", "Nét và điểm"],
+    ["Hidden", "Oculta", "Oculta", "Khuất"],
+    ["Centre", "Eixo", "Eje", "Tâm"],
+    ["Hairline", "Linha capilar", "Línea capilar", "Nét mảnh"],
+    ["Thin Lines", "Linhas finas", "Líneas finas", "Nét mảnh"],
+    ["Medium Lines", "Linhas médias", "Líneas medias", "Nét vừa"],
+    ["Wide Lines", "Linhas grossas", "Líneas gruesas", "Nét đậm"],
+    ["Hidden Lines", "Linhas ocultas", "Líneas ocultas", "Nét khuất"],
+    ["Solid fill", "Preenchimento sólido", "Relleno sólido", "Tô đặc"],
+    ["Diagonal Up", "Diagonal para cima", "Diagonal ascendente", "Chéo lên"],
+    ["Diagonal Down", "Diagonal para baixo", "Diagonal descendente", "Chéo xuống"],
+    ["Diagonal Crosshatch", "Hachura cruzada diagonal", "Sombreado cruzado diagonal", "Hoa văn chéo"],
+    ["Crosshatch", "Hachura cruzada", "Sombreado cruzado", "Hoa văn chéo"],
+    ["Horizontal", "Horizontal", "Horizontal", "Ngang"],
+    ["Vertical", "Vertical", "Vertical", "Dọc"],
+    ["Sand", "Areia", "Arena", "Cát"],
+    ["Brick 225 x 75", "Tijolo 225 x 75", "Ladrillo 225 x 75", "Gạch 225 x 75"],
+    ["Tile 300", "Ladrilho 300", "Baldosa 300", "Gạch lát 300"],
+    ["Solid Black", "Preto sólido", "Negro sólido", "Đen đặc"],
+    ["Masking", "Máscara", "Máscara", "Che"],
+    ["Centre Lines", "Linhas de eixo", "Líneas de eje", "Đường tâm"],
+    ["Overhead Lines", "Linhas superiores", "Líneas superiores", "Đường phía trên"],
     // Phases and the phase filters a project starts with.
     ["Existing", "Existente", "Existente", "Hiện hữu"],
     ["New Construction", "Nova construção", "Nueva construcción", "Xây mới"],

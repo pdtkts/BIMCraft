@@ -13,9 +13,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::cloud::Cloud;
 use crate::family::{Family, Piece};
+pub use crate::fills::FilledRegion;
+use crate::fills::{self, FillPattern, FilledRegionType};
 use crate::geom::{self, P2, Region};
 use crate::graphics::{self, Graphics, ViewFilter, ViewTemplate};
+pub use crate::groups::{DetailGroup, RepeatingDetail};
 use crate::language::Language;
+pub use crate::lines::DetailLine;
+use crate::lines::{self, LinePattern, LineStyle};
 use crate::phasing::{self, OptionSet, PhaseFilter, Status};
 use crate::texture::{Kind, MAX_IMAGES, Picture, Texture};
 use crate::units::Units;
@@ -25,6 +30,9 @@ pub use crate::ids::{Elements, FIRST_ID, Guid, Id, Key};
 
 /// A line in plan, through two points.
 pub type Line = (P2, P2);
+
+/// The least a section box runs on each axis, mm.
+pub const MIN_SECTION_BOX: f64 = 10.0;
 
 /// Height of a plan view's cut plane above its level, unless its view range says otherwise; rooms
 /// find the walls that bound them at this height.
@@ -58,7 +66,11 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
-/// The version of the project file this build writes, and the newest it reads. 5: a project holds scans (`clouds`, library
+/// The version of the project file this build writes, and the newest it reads. 6: a project holds detailing (library kinds
+/// `line-pattern`, `line-style`, `fill-pattern`, `filled-region-type` and `detail-group`; the elements `line`, `region`,
+/// `detailgroup` and `repeatingdetail`; sketch parts; the model keys `line_styles`, `fill_patterns` and `region_types`);
+/// nothing in a file of 5 changes, but a build that reads up to 5 would answer one of 6 with a serde error ("isn't a kind of
+/// library entry", "unknown variant"), not "saved by a newer BIMCraft". 5: a project holds scans (`clouds`, library
 /// entries of kind `Cloud`) and point clouds place them, and its language can be Vietnamese (`vi`); nothing in a file of 4
 /// changes, but a build that reads up to 4 would answer one of 5 with a serde error, not "saved by a newer BIMCraft" (a
 /// language it doesn't know, too). 4: a line weight is a pen (0 to 16), not
@@ -67,7 +79,7 @@ pub const MAX_SLOPE: f64 = 75.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -90,11 +102,23 @@ pub struct Level {
     /// What its plan hides and how it draws the rest.
     #[serde(default, skip_serializing_if = "Graphics::is_default")]
     pub graphics: Graphics,
+    /// Whether its plan shows what the default 3D view's section box keeps, while it's on: the box's heights as its view
+    /// range and its sides as its crop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub section_box: bool,
 }
 
 impl Level {
     pub fn new(name: impl Into<String>, elevation: f64) -> Level {
-        Level { name: name.into(), elevation, view_range: ViewRange::default(), crop: None, extent: None, graphics: Graphics::default() }
+        Level {
+            name: name.into(),
+            elevation,
+            view_range: ViewRange::default(),
+            crop: None,
+            extent: None,
+            graphics: Graphics::default(),
+            section_box: false,
+        }
     }
 }
 
@@ -278,6 +302,12 @@ pub struct Material {
     pub cut: Pattern,
     #[serde(default)]
     pub surface: Pattern,
+    /// The project's fill patterns its cut and its surfaces show, by name, as Revit's materials: over `cut` and `surface`
+    /// when given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut_pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_pattern: Option<String>,
     /// What its surfaces look like in the 3D view, over its colour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<Texture>,
@@ -285,7 +315,14 @@ pub struct Material {
 
 impl Default for Material {
     fn default() -> Material {
-        Material { color: [200, 200, 200], cut: Pattern::None, surface: Pattern::None, texture: None }
+        Material {
+            color: [200, 200, 200],
+            cut: Pattern::None,
+            surface: Pattern::None,
+            cut_pattern: None,
+            surface_pattern: None,
+            texture: None,
+        }
     }
 }
 
@@ -343,6 +380,15 @@ pub struct Floor {
     /// Carries load: a structural floor, as Revit's Floor: Structural makes one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub structural: bool,
+    /// Where its top's model pattern starts, and how far it's turned, degrees: Revit's aligned and rotated pattern.
+    #[serde(default, skip_serializing_if = "crate::fills::at_origin")]
+    pub pattern_origin: P2,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pattern_angle: f64,
+    /// The sketch it was drawn or last edited by: its lines, each a part with an id and a GUID of its own. Empty when it
+    /// was made another way (over the walls, from a file); Edit Boundary then starts from its outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch: Vec<crate::sketch::SketchLine>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -360,6 +406,10 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub openings: Vec<Vec<P2>>,
     pub offset: f64,
+    /// The sketch it was drawn or last edited by: its lines, each a part with an id and a GUID of its own. Empty when it
+    /// was made another way (over the walls, from a file); Edit Boundary then starts from its outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch: Vec<crate::sketch::SketchLine>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -378,6 +428,10 @@ pub struct Shaft {
     pub height: f64,
     #[serde(default)]
     pub base_offset: f64,
+    /// The sketch it was drawn or last edited by: its lines, each a part with an id and a GUID of its own. Empty when it
+    /// was made another way (over the walls, from a file); Edit Boundary then starts from its outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch: Vec<crate::sketch::SketchLine>,
 }
 
 /// A mass, Revit's conceptual building volume: `boundary` (counter-clockwise) extruded from `base_offset` above `level`
@@ -672,6 +726,10 @@ pub struct PlanView {
     pub graphics: Graphics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<Guid>,
+    /// Whether its plan shows what the default 3D view's section box keeps, while it's on: the box's heights as its view
+    /// range and its sides as its crop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub section_box: bool,
 }
 
 /// A 3D view, seen from `azimuth` degrees round from east (counter-clockwise) and `elevation`
@@ -685,6 +743,37 @@ pub struct View3D {
     /// What it hides and how it draws the rest.
     #[serde(default, skip_serializing_if = "Graphics::is_default")]
     pub graphics: Graphics,
+    /// The box it is cut to, as Revit's Section Box: kept, with its extents, when it's turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_box: Option<SectionBox>,
+}
+
+impl View3D {
+    /// The default 3D view, `{3D}`, as it is before anything changes it.
+    pub fn default_view() -> View3D {
+        View3D {
+            name: "{3D}".into(),
+            azimuth: crate::view3d::AZIMUTH,
+            elevation: crate::view3d::ELEVATION,
+            graphics: Graphics::default(),
+            section_box: None,
+        }
+    }
+}
+
+/// A 3D view's section box: six planes square to the axes, from `min` to `max` (mm), keeping what lies between them while it
+/// is `on`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionBox {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+    #[serde(default = "yes")]
+    pub on: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// A door's or window's tag, showing its mark in the plan of its wall's level, `offset` mm from
@@ -939,9 +1028,38 @@ pub struct Roof {
     pub join: Option<Guid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extrusion: Option<Extrusion>,
+    /// The sketch it was drawn or last edited by: its lines, each a part with an id and a GUID of its own. Empty when it
+    /// was made another way (over the walls, from a file); Edit Boundary then starts from its outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch: Vec<crate::sketch::SketchLine>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+}
+
+impl Element {
+    /// The sketch it keeps, when it's of a kind drawn by one: a floor's, a ceiling's, a roof's, a shaft's.
+    pub fn sketch(&self) -> Option<&Vec<crate::sketch::SketchLine>> {
+        match self {
+            Element::Floor(f) => Some(&f.sketch),
+            Element::Ceiling(c) => Some(&c.sketch),
+            Element::Roof(r) => Some(&r.sketch),
+            Element::Shaft(sh) => Some(&sh.sketch),
+            Element::FilledRegion(r) => Some(&r.sketch),
+            _ => None,
+        }
+    }
+
+    pub fn sketch_mut(&mut self) -> Option<&mut Vec<crate::sketch::SketchLine>> {
+        match self {
+            Element::Floor(f) => Some(&mut f.sketch),
+            Element::Ceiling(c) => Some(&mut c.sketch),
+            Element::Roof(r) => Some(&mut r.sketch),
+            Element::Shaft(sh) => Some(&mut sh.sketch),
+            Element::FilledRegion(r) => Some(&mut r.sketch),
+            _ => None,
+        }
+    }
 }
 
 impl Roof {
@@ -1146,6 +1264,10 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? r.join { f(g) }
             }
             Element::Text(n) => f(& $($m)? n.view),
+            Element::DetailLine(l) => f(& $($m)? l.view),
+            Element::FilledRegion(r) => f(& $($m)? r.view),
+            Element::DetailGroup(g) => f(& $($m)? g.view),
+            Element::RepeatingDetail(r) => f(& $($m)? r.view),
             Element::Spot(s) => {
                 f(& $($m)? s.view);
                 if let Some(g) = & $($m)? s.host { f(g) }
@@ -1194,6 +1316,18 @@ pub enum Element {
     Railing(Railing),
     Roof(Roof),
     Text(Note),
+    /// A detail line: drawn in one view, in a line style; of the Lines category, as Revit's.
+    #[serde(rename = "line")]
+    DetailLine(DetailLine),
+    /// A filled region: a sketch's outlines in one view, filled as its type says; of Revit's Filled Region.
+    #[serde(rename = "region")]
+    FilledRegion(FilledRegion),
+    /// A detail group placed in one view: its type's lines, regions and notes, moved and turned; of Revit's Detail Groups.
+    #[serde(rename = "detailgroup")]
+    DetailGroup(DetailGroup),
+    /// A detail group repeated along a line in one view; of Revit's Repeating Detail.
+    #[serde(rename = "repeatingdetail")]
+    RepeatingDetail(RepeatingDetail),
     Spot(Spot),
     Schedule(Schedule),
     View3D(View3D),
@@ -1362,6 +1496,10 @@ impl Element {
     pub fn category(&self) -> &'static str {
         match self {
             Element::Text(_) => "text",
+            Element::DetailLine(_) => "line",
+            Element::FilledRegion(_) => "region",
+            Element::DetailGroup(_) => "detailgroup",
+            Element::RepeatingDetail(_) => "repeatingdetail",
             Element::Spot(_) => "spot",
             Element::Link(_) => "link",
             Element::PointCloud(_) => "pointcloud",
@@ -1639,6 +1777,21 @@ pub struct Model {
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
+    /// Its line patterns, by name: dashes, dots and spaces, mm on paper.
+    #[serde(default = "lines::default_patterns")]
+    pub line_patterns: BTreeMap<String, LinePattern>,
+    /// Its line styles, by name: a pen, a colour and a pattern, what detail lines draw in.
+    #[serde(default = "lines::default_styles")]
+    pub line_styles: BTreeMap<String, LineStyle>,
+    /// Its fill patterns, by name: families of lines, drafting (mm on paper) or model (mm in the building); none, solid.
+    #[serde(default = "fills::default_patterns")]
+    pub fill_patterns: BTreeMap<String, FillPattern>,
+    /// Its filled region types, by name: a foreground and a background pattern and their colours, masking or not.
+    #[serde(default = "fills::default_region_types")]
+    pub region_types: BTreeMap<String, FilledRegionType>,
+    /// Its detail group types, by name: the members each one placed draws.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub detail_groups: BTreeMap<String, crate::groups::GroupType>,
     pub elements: Elements,
     /// The ids and GUIDs of the library: its types, materials, pictures, families, parameters, view filters and
     /// templates, phases, phase filters and design options.
@@ -1687,6 +1840,11 @@ impl Model {
             option_sets: BTreeMap::new(),
             line_weights: None,
             object_styles: BTreeMap::new(),
+            line_patterns: lines::patterns(language),
+            line_styles: lines::styles(language),
+            fill_patterns: fills::patterns(language),
+            region_types: fills::region_types(language),
+            detail_groups: BTreeMap::new(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
             loaded: BTreeMap::new(),
@@ -1712,7 +1870,7 @@ impl Model {
             ("Copper", [184, 115, 51], Pattern::Solid, Pattern::None, Some(Kind::Metal)),
         ] {
             let texture = texture.map(Texture::new);
-            m.materials.insert(language.word(name).into(), Material { color, cut, surface, texture });
+            m.materials.insert(language.word(name).into(), Material { color, cut, surface, texture, ..Material::default() });
         }
         m.families = crate::family::library(language);
         for (n, t) in [("Generic - 200mm", 200.0), ("Interior - 100mm", 100.0)] {
@@ -2059,6 +2217,21 @@ impl Model {
                 }
             }
         }
+        // A detail group's members are elements too, held by their type, and are looked into the same way.
+        if let Some(Value::Object(groups)) = v.get_mut("detail_groups") {
+            for (name, group) in groups.iter_mut() {
+                let Some(Value::Array(members)) = group.get_mut("members") else { continue };
+                for (i, member) in members.iter_mut().enumerate() {
+                    let Some(e) = member.get_mut("element") else { continue };
+                    let mut bare = e.clone();
+                    let category = bare.as_object_mut().and_then(|o| o.remove("category"));
+                    for p in lenient::element(category.as_ref().and_then(Value::as_str).unwrap_or(""), &bare) {
+                        lenient::remove(e, &p);
+                        left_out.push(format!("/detail_groups/{}/members/{i}/element{p}", lenient::escaped(name)));
+                    }
+                }
+            }
+        }
         if v.is_object() {
             v["elements"] = Value::Object(serde_json::Map::new());
             let found = lenient::unknown::<Model>(&v);
@@ -2104,8 +2277,18 @@ impl Model {
             }
         }
         self.next_id = self.next_id.max(FIRST_ID);
+        // A file from before line styles leaves the patterns and styles out, so it has the English ones, whatever its
+        // language: named in its language (a file that holds them has them by GUID, never equal to these).
+        if self.language != Language::English
+            && self.line_styles == lines::default_styles()
+            && self.line_patterns == lines::default_patterns()
+        {
+            (self.line_styles, self.line_patterns) = (lines::styles(self.language), lines::patterns(self.language));
+        }
         // 4 to 5 (scans, and the point clouds that place them; a project's language being Vietnamese) has no step: a file of
         // 4 holds none of it, or holds it as 5 does.
+        // 5 to 6 (detailing: lines, regions, groups, repeating details, line and fill styles) has none either: a file of 5 holds
+        // none of it, so reading it as 6 changes nothing.
         self.format = FORMAT;
     }
 
@@ -2134,6 +2317,27 @@ impl Model {
         }
         self.next_id = id + 1;
         id
+    }
+
+    /// Where element `id`'s model pattern starts (its `pattern_origin`) once its pattern line `line` lies on `reference`:
+    /// the origin moved across by the gap between the two, which must run the same way (plan mm, a line by its two ends).
+    /// What Align on a pattern asks of the model; set the answer with `modify`. A filled region or a floor has a pattern to
+    /// align; the error says what else is wrong.
+    pub fn align_pattern(&self, id: Id, reference: (P2, P2), line: (P2, P2)) -> Result<P2, String> {
+        let origin = match self.elements.get(id) {
+            Some(Element::FilledRegion(r)) => r.pattern_origin,
+            Some(Element::Floor(f)) => f.pattern_origin,
+            Some(e) => return Err(format!("{} {id} has no model pattern to align; a filled region or a floor has", e.category())),
+            None => return Err(format!("no element {id}")),
+        };
+        if [reference, line].iter().any(|(a, b)| !(a.is_finite() && b.is_finite()) || a.dist(*b) < TOL) {
+            return Err("align: a line of no length, or no number, can't be aligned to".into());
+        }
+        if !crate::geom::parallel(reference.0, reference.1, line.0, line.1) {
+            return Err("align: the lines aren't parallel".into());
+        }
+        let across = (reference.1 - reference.0).unit().perp();
+        Ok(crate::commands::micron(origin + across * (reference.0 - line.0).dot(across)))
     }
 
     /// Element `k` as messages name it: its id, or, when the project hasn't it, what `k` is.
@@ -2169,6 +2373,17 @@ impl Model {
     /// extent, else [`Model::model_extent`].
     pub fn level_extent(&self, id: impl Key) -> Option<[P2; 2]> {
         Some(self.level(id)?.extent.unwrap_or_else(|| self.model_extent()))
+    }
+
+    /// The box round every solid and placed scan, its min and max corners; none in an empty project.
+    pub fn model_box(&self) -> Option<([f64; 3], [f64; 3])> {
+        let clouds = self.elements.iter().filter_map(|(id, _)| self.cloud_box(*id)).flat_map(|(lo, hi)| [lo, hi]);
+        let pts = crate::view3d::solids(self).iter().flat_map(|s| s.corners()).chain(clouds).collect::<Vec<_>>();
+        let first = *pts.first()?;
+        Some(
+            pts.iter()
+                .fold((first, first), |(lo, hi), p| (std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i])))),
+        )
     }
 
     /// What a level stretches over without an extent of its own: every solid and grid in plan,
@@ -2359,6 +2574,37 @@ impl Model {
         PlanRange { top: r.top.map_or_else(above, |t| z + t).max(z + r.cut), cut: z + r.cut, bottom: z + r.bottom, depth: z + r.depth }
     }
 
+    /// The default 3D view's section box, its min and max corners, if plan `key` follows it (a dependent view as its parent
+    /// does) and it's on.
+    pub fn plan_box(&self, key: impl Key) -> Option<([f64; 3], [f64; 3])> {
+        let follows = match self.elements.get(self.plan_source(key)) {
+            Some(Element::Level(l)) => l.section_box,
+            Some(Element::PlanView(v)) => v.section_box,
+            _ => false,
+        };
+        follows.then(|| self.default_3d().and_then(|v| self.section_box(v))).flatten()
+    }
+
+    /// The heights plan `key` shows: its view range's, or, following the section box, from the box's bottom up to its top,
+    /// where it cuts. What a plan draws and snaps to; commands that ask what a plan cuts keep its own range.
+    pub fn shown_range(&self, key: impl Key) -> PlanRange {
+        match self.plan_box(key) {
+            Some((lo, hi)) => PlanRange { top: hi[2], cut: hi[2], bottom: lo[2], depth: lo[2] },
+            None => self.plan_range(key),
+        }
+    }
+
+    /// The crop plan `key` is drawn with: its own crop region, cut to the section box's sides when it follows the box.
+    pub fn shown_crop(&self, key: impl Key) -> Option<[P2; 2]> {
+        let own = self.crop_of(key);
+        let Some((lo, hi)) = self.plan_box(key) else { return own };
+        let (blo, bhi) = (P2(lo[0], lo[1]), P2(hi[0], hi[1]));
+        Some(match own {
+            Some([a, b]) => [P2(a.0.max(blo.0), a.1.max(blo.1)), P2(b.0.min(bhi.0), b.1.min(bhi.1))],
+            None => [blo, bhi],
+        })
+    }
+
     /// The level plan `key` is of: a level itself, or the level of a plan view.
     pub fn plan_level(&self, key: impl Key) -> Option<Id> {
         match self.elements.get(key)? {
@@ -2417,7 +2663,12 @@ impl Model {
         match e {
             Element::Dimension(d) => Some(d.view.unwrap_or(d.level)),
             Element::Tag(t) => t.view.or_else(|| self.level_of(e)),
-            Element::Text(Note { view, .. }) | Element::Spot(Spot { view, .. }) => Some(*view),
+            Element::Text(Note { view, .. })
+            | Element::Spot(Spot { view, .. })
+            | Element::DetailLine(DetailLine { view, .. })
+            | Element::FilledRegion(FilledRegion { view, .. })
+            | Element::DetailGroup(DetailGroup { view, .. })
+            | Element::RepeatingDetail(RepeatingDetail { view, .. }) => Some(*view),
             _ => None,
         }
     }
@@ -2436,6 +2687,7 @@ impl Model {
             m.keys().map(String::as_str).collect()
         }
         match crate::commands::category(category).as_str() {
+            "region" => names(&self.region_types),
             "wall" => names(&self.types.wall),
             "floor" => names(&self.types.floor),
             "door" => names(&self.types.door),
@@ -2455,6 +2707,7 @@ impl Model {
     /// with, else the first by name.
     pub fn default_type(&self, category: &str) -> Option<&str> {
         let preferred = match crate::commands::category(category).as_str() {
+            "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "wall" | "floor" => "Generic - 200mm",
             "door" => "Single 900 x 2100",
             "column" => "Rectangular 400 x 400",
@@ -2619,7 +2872,12 @@ impl Model {
             Element::Door(o) | Element::Window(o) => wall_level(o),
             Element::Tag(t) => self.elements.get(t.host).filter(|h| !matches!(h, Element::Tag(_))).and_then(|h| self.level_of(h)),
             // Notes and spot elevations in a level's plan.
-            Element::Text(Note { view, .. }) | Element::Spot(Spot { view, .. }) => self.plan_level(*view).map(|l| self.guid(l)),
+            Element::Text(Note { view, .. })
+            | Element::Spot(Spot { view, .. })
+            | Element::DetailLine(DetailLine { view, .. })
+            | Element::FilledRegion(FilledRegion { view, .. })
+            | Element::DetailGroup(DetailGroup { view, .. })
+            | Element::RepeatingDetail(RepeatingDetail { view, .. }) => self.plan_level(*view).map(|l| self.guid(l)),
             // A plan view stands on its level: it goes with it.
             Element::PlanView(v) => Some(v.level),
             Element::Level(_)
@@ -2966,6 +3224,14 @@ impl Model {
         }
     }
 
+    /// The box 3D view `view` is cut to, its min and max corners: none when it has none, or it's turned off.
+    pub fn section_box(&self, view: impl Key) -> Option<([f64; 3], [f64; 3])> {
+        match self.elements.get(view) {
+            Some(Element::View3D(View3D { section_box: Some(b), .. })) if b.on => Some((b.min, b.max)),
+            _ => None,
+        }
+    }
+
     /// The default 3D view, `{3D}`: the 3D view of that name, once something has made it.
     pub fn default_3d(&self) -> Option<Id> {
         self.elements.iter().find_map(|(id, e)| matches!(e, Element::View3D(v) if v.name == "{3D}").then_some(*id))
@@ -3138,7 +3404,25 @@ impl Model {
                 let (axis, (ext, int)) = (walls::Axis::of(w), walls::faces(self, w));
                 Ok((axis.at(along, int), axis.at(along, ext)))
             }
-            (Some(e), _) => Err(format!("{} {} isn't a wall, a door, a window or a grid", e.category(), r.id)),
+            // A straight detail line: its line, or a short line square to it at either end.
+            (Some(Element::DetailLine(l)), face) => {
+                if l.curve.kind() != "line" {
+                    return Err(format!(
+                        "detail line {} is a {}; dimensions measure to straight ones (and radial ones to circles and arcs)",
+                        r.id,
+                        l.curve.kind()
+                    ));
+                }
+                let (a, b) = (l.curve.start(), l.curve.end());
+                let n = (b - a).unit().perp() * 100.0;
+                match face {
+                    Face::Centre => Ok((a, b)),
+                    Face::Start => Ok((a - n, a + n)),
+                    Face::End => Ok((b - n, b + n)),
+                    Face::Left | Face::Right => Err(format!("detail line {} has a line and two ends; measure to one of those", r.id)),
+                }
+            }
+            (Some(e), _) => Err(format!("{} {} isn't a wall, a door, a window, a grid or a detail line", e.category(), r.id)),
             (None, _) => Err(format!("element {} doesn't exist", r.id)),
         }
     }
@@ -3151,6 +3435,7 @@ impl Model {
             Some(Element::Wall(_)) => &[Face::Centre, Face::Left, Face::Right, Face::Start, Face::End],
             Some(Element::Door(_) | Element::Window(_)) => &[Face::Centre, Face::Start, Face::End],
             Some(Element::Grid(_)) => &[Face::Centre],
+            Some(Element::DetailLine(_)) => &[Face::Centre, Face::Start, Face::End],
             _ => &[],
         };
         faces
@@ -3200,6 +3485,51 @@ impl Model {
         })
     }
 
+    /// The stretch of its wall's location line a door or window stands in, as distances along it: from the nearest face,
+    /// on either side of its middle, of a wall that meets its wall (crossing it, or joined to it from either side) on the
+    /// plan of its wall's level, else from the wall's start and to its end. What its temporary dimensions measure to, as
+    /// Revit's do to wall faces. None on a curved wall.
+    pub fn opening_span(&self, o: &Opening) -> Option<(f64, f64)> {
+        let host = self.wall(o.host).filter(|w| w.arc == 0.0)?;
+        let axis = walls::Axis::of(host);
+        let length = axis.length();
+        if length <= TOL {
+            return None;
+        }
+        let (a, b) = (axis.at(0.0, 0.0), axis.at(length, 0.0));
+        let along = |p: P2| (p - a).dot(b - a) / length;
+        // A wall joined to it ends at its location line or at one of its faces.
+        let (ext, int) = walls::faces(self, host);
+        let reach = ext.abs().max(int.abs()) + TOL;
+        let hits: Vec<f64> = self
+            .elements
+            .with_guids()
+            .filter_map(|(_, id, e)| match e {
+                Element::Wall(w) if id != o.host && w.arc == 0.0 && self.cut_by(w, host.level) => Some(w),
+                _ => None,
+            })
+            .flat_map(|w| {
+                let (axis, (ext, int)) = (walls::Axis::of(w), walls::faces(self, w));
+                [ext, int].map(|off| (axis.at(0.0, off), axis.at(axis.length(), off)))
+            })
+            .filter_map(|(p, q)| {
+                let hit = geom::line_intersection(a, b, p, q)?;
+                (geom::dist_to_segment(hit, p, q) <= reach).then(|| along(hit))
+            })
+            .collect();
+        let start = hits.iter().copied().filter(|&t| t < o.offset).fold(0.0, f64::max);
+        let end = hits.iter().copied().filter(|&t| t > o.offset).fold(length, f64::min);
+        Some((start, end))
+    }
+
+    /// The offset halfway along opening `o`'s stretch of wall (`opening_span`), when `o` stands within `near` mm of it:
+    /// where a door or window snaps as it's placed or dragged.
+    pub fn centred(&self, o: &Opening, near: f64) -> Option<f64> {
+        let (start, end) = self.opening_span(o)?;
+        let middle = (start + end) / 2.0;
+        ((o.offset - middle).abs() <= near).then_some(middle)
+    }
+
     /// The circle a radial dimension measures on `r`: a round column's centre and radius, or a
     /// curved wall's, of its centre line or one of its faces.
     pub fn reference_arc(&self, r: &Reference) -> Result<(P2, f64), String> {
@@ -3219,6 +3549,15 @@ impl Model {
                 let c = axis.centre().ok_or_else(|| format!("wall {} is straight; {what}", r.id))?;
                 Ok((c, axis.at(0.0, off).dist(c)))
             }
+            Some(Element::DetailLine(l)) => match &l.curve {
+                crate::curves::Curve::Circle { centre, radius } => Ok((*centre, *radius)),
+                c => c
+                    .segments()
+                    .first()
+                    .filter(|_| c.kind() == "arc")
+                    .and_then(|s| Some((s.centre()?, s.radius()?)))
+                    .ok_or_else(|| format!("detail line {} is a {}; {what}, circles and arcs", r.id, c.kind())),
+            },
             Some(e) => Err(format!("{} {} isn't round; {what}", e.category(), r.id)),
             None => Err(format!("element {} doesn't exist", r.id)),
         }
@@ -3337,6 +3676,64 @@ impl Model {
         geom::region_at(&self.bounding_lines(r.level), r.point, TOL)
     }
 
+    /// What a detail line, a filled region or a text note must be, wherever it is: in a view or in a detail group.
+    fn annotation_ok(&self, who: &str, e: &Element) -> Result<(), String> {
+        match e {
+            Element::Text(n) => {
+                point(who, n.at)?;
+                text(who, "text", &n.text)?;
+                if n.text.trim().is_empty() {
+                    return Err(format!("{who}: a text note needs text"));
+                }
+                if !(n.size > 0.0 && n.size <= 100.0) {
+                    return Err(format!("{who}: size {} mm isn't above 0 and at most 100", n.size));
+                }
+                coord(&format!("{who} angle"), n.angle)?;
+                if let Some(l) = n.leader {
+                    point(&format!("{who} leader"), l)?;
+                }
+            }
+            Element::DetailLine(l) => {
+                l.check(who)?;
+                if !self.line_styles.contains_key(&l.style) {
+                    let there: Vec<&str> = self.line_styles.keys().map(String::as_str).collect();
+                    return Err(format!("{who}: there's no line style `{}` (there are: {})", l.style, there.join(", ")));
+                }
+            }
+            Element::FilledRegion(r) => {
+                point(&format!("{who} pattern origin"), r.pattern_origin)?;
+                coord(&format!("{who} pattern angle"), r.pattern_angle)?;
+                crate::sketch::check(who, &r.sketch)?;
+                if r.sketch.is_empty() {
+                    return Err(format!("{who}: a region's sketch has no lines; it needs a loop of them (a circle is one)"));
+                }
+                if let Err(problems) = crate::sketch::solve(&r.sketch) {
+                    let said = crate::sketch::say(&problems, &crate::sketch::namer(&r.sketch));
+                    return Err(format!("{who}: its sketch doesn't close into loops: {said}"));
+                }
+                if !self.region_types.contains_key(&r.type_name) {
+                    let there: Vec<&str> = self.region_types.keys().map(String::as_str).collect();
+                    return Err(format!("{who}: there's no filled region type `{}` (there are: {})", r.type_name, there.join(", ")));
+                }
+                if let Some(st) = &r.line_style
+                    && !self.line_styles.contains_key(st)
+                {
+                    return Err(format!("{who}: there's no line style `{st}`"));
+                }
+                if let Some((i, st)) = r
+                    .sketch
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, l)| l.style.as_ref().filter(|st| !self.line_styles.contains_key(*st)).map(|st| (i, st)))
+                {
+                    return Err(format!("{who}: boundary line {i} is drawn in `{st}`, and there's no such line style"));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Everything that must hold between commands: references resolve, geometry is finite and
     /// not degenerate, doors and windows fit their walls and don't overlap.
     pub fn check(&self) -> Result<(), String> {
@@ -3346,6 +3743,48 @@ impl Model {
         for (c, style) in &self.object_styles {
             crate::styles::known(c)?;
             style.check(c)?;
+        }
+        for (n, p) in &self.line_patterns {
+            if n.eq_ignore_ascii_case(lines::SOLID) {
+                return Err(format!("line pattern `{n}`: {} is a line with no pattern; name it another way", lines::SOLID));
+            }
+            p.check(n)?;
+        }
+        for (n, s) in &self.line_styles {
+            s.check(n, &self.line_patterns)?;
+        }
+        for (n, p) in &self.fill_patterns {
+            p.check(n)?;
+        }
+        for (n, t) in &self.region_types {
+            t.check(n, &self.fill_patterns)?;
+        }
+        for (n, x) in &self.materials {
+            for p in [&x.cut_pattern, &x.surface_pattern].into_iter().flatten() {
+                if !self.fill_patterns.contains_key(p) {
+                    return Err(format!("material `{n}`: there's no fill pattern `{p}`"));
+                }
+            }
+        }
+        for (n, g) in &self.detail_groups {
+            text(&format!("detail group `{n}`"), "name", n)?;
+            if g.members.is_empty() || g.members.len() > crate::groups::MAX_MEMBERS {
+                return Err(format!(
+                    "detail group `{n}`: it holds {} members; it holds 1 to {}",
+                    g.members.len(),
+                    crate::groups::MAX_MEMBERS
+                ));
+            }
+            for (i, m) in g.members.iter().enumerate() {
+                let who = format!("detail group `{n}` member {i}");
+                if !crate::groups::holds(&m.element) {
+                    return Err(format!(
+                        "{who}: a {} can't be in a detail group; it holds detail lines, filled regions and text",
+                        m.element.category()
+                    ));
+                }
+                self.annotation_ok(&who, &m.element)?;
+            }
         }
         for (cat, map) in [("door", &self.types.door), ("window", &self.types.window)] {
             for (n, t) in map {
@@ -3484,8 +3923,10 @@ impl Model {
         let mut sheet_numbers = BTreeSet::new();
         // Each view on a sheet: the sheet.
         let mut placed: BTreeMap<Guid, Guid> = BTreeMap::new();
-        // Openings by host wall: (start, end, id) along it.
-        let mut spans: BTreeMap<Guid, Vec<(f64, f64, Id)>> = BTreeMap::new();
+        // Openings by host wall, in the order they start along it.
+        let mut spans: BTreeMap<Guid, Vec<OpeningSpan>> = BTreeMap::new();
+        // The members each view's detail groups and repeating details place.
+        let mut members_placed: BTreeMap<Guid, usize> = BTreeMap::new();
         for (&id, e) in &self.elements {
             let who = format!("{} {id}", e.category());
             let level_ok = |l: Guid| self.level(l).map(|_| ()).ok_or(format!("{who}: level {} doesn't exist", self.shown(l)));
@@ -3590,10 +4031,13 @@ impl Model {
                     }
                 }
                 Element::Floor(f) => {
+                    point(&format!("{who} pattern origin"), f.pattern_origin)?;
+                    coord(&format!("{who} pattern angle"), f.pattern_angle)?;
                     known(&who, &f.type_name, &self.types.floor)?;
                     level_ok(f.level)?;
                     boundary(&who, &f.boundary)?;
                     openings(&who, &f.boundary, &f.openings)?;
+                    crate::sketch::check(&who, e.sketch().map_or(&[][..], Vec::as_slice))?;
                     coord(&format!("{who} offset"), f.offset)?;
                     if !(f.slope.is_finite() && f.slope.abs() <= MAX_SLOPE) {
                         return Err(format!("{who}: slope {}° isn't between -{MAX_SLOPE}° and {MAX_SLOPE}°", f.slope));
@@ -3613,12 +4057,14 @@ impl Model {
                     level_ok(c.level)?;
                     boundary(&who, &c.boundary)?;
                     openings(&who, &c.boundary, &c.openings)?;
+                    crate::sketch::check(&who, e.sketch().map_or(&[][..], Vec::as_slice))?;
                     coord(&format!("{who} offset"), c.offset)?;
                 }
                 Element::Shaft(sh) => {
                     level_ok(sh.level)?;
                     boundary(&who, &sh.boundary)?;
                     coord(&format!("{who} base_offset"), sh.base_offset)?;
+                    crate::sketch::check(&who, e.sketch().map_or(&[][..], Vec::as_slice))?;
                     match sh.top_level {
                         Some(t) => level_ok(t)?,
                         None => size(&format!("{who} height"), sh.height)?,
@@ -3684,7 +4130,10 @@ impl Model {
                             self.shown(o.host)
                         ));
                     }
-                    spans.entry(o.host).or_default().push((a, b, id));
+                    let span = OpeningSpan { start: a, end: b, sill: o.sill, head: o.sill + t.height, id };
+                    let list = spans.entry(o.host).or_default();
+                    let at = list.partition_point(|held| held.start <= a);
+                    list.insert(at, span);
                 }
                 Element::Room(r) => {
                     level_ok(r.level)?;
@@ -3734,20 +4183,40 @@ impl Model {
                         }
                     }
                 }
-                Element::Text(n) => {
-                    view_ok(n.view, true)?;
-                    point(&who, n.at)?;
-                    text(&who, "text", &n.text)?;
-                    if n.text.trim().is_empty() {
-                        return Err(format!("{who}: a text note needs text"));
+                Element::Text(Note { view, .. })
+                | Element::DetailLine(DetailLine { view, .. })
+                | Element::FilledRegion(FilledRegion { view, .. }) => {
+                    view_ok(*view, true)?;
+                    self.annotation_ok(&who, e)?;
+                }
+                Element::DetailGroup(g) => {
+                    view_ok(g.view, true)?;
+                    point(&who, g.at)?;
+                    coord(&format!("{who} angle"), g.angle)?;
+                    let Some(t) = self.detail_groups.get(&g.type_name) else {
+                        let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
+                        return Err(format!("{who}: there's no detail group `{}` (there are: {})", g.type_name, there.join(", ")));
+                    };
+                    placing(&who, &mut members_placed, g.view, t.members.len())?;
+                }
+                Element::RepeatingDetail(r) => {
+                    view_ok(r.view, true)?;
+                    point(&who, r.start)?;
+                    point(&who, r.end)?;
+                    if !(r.spacing.is_finite() && r.spacing >= 1.0 && r.spacing <= MAX_COORD) {
+                        return Err(format!("{who}: spacing {} mm isn't from 1 mm to {MAX_COORD}", r.spacing));
                     }
-                    if !(n.size > 0.0 && n.size <= 100.0) {
-                        return Err(format!("{who}: size {} mm isn't above 0 and at most 100", n.size));
+                    if r.places().is_none() {
+                        return Err(format!(
+                            "{who}: it would repeat more than {} times; space it wider or draw it shorter",
+                            crate::groups::MAX_REPEATS
+                        ));
                     }
-                    coord(&format!("{who} angle"), n.angle)?;
-                    if let Some(l) = n.leader {
-                        point(&format!("{who} leader"), l)?;
-                    }
+                    let Some(t) = self.detail_groups.get(&r.type_name) else {
+                        let there: Vec<&str> = self.detail_groups.keys().map(String::as_str).collect();
+                        return Err(format!("{who}: there's no detail group `{}` (there are: {})", r.type_name, there.join(", ")));
+                    };
+                    placing(&who, &mut members_placed, r.view, t.members.len().saturating_mul(r.count()))?;
                 }
                 Element::PointCloud(pc) => {
                     if !self.clouds.contains_key(&pc.cloud) {
@@ -3841,6 +4310,9 @@ impl Model {
                         return Err(format!("{who}: elevation {}° isn't between -89° and 89°", v.elevation));
                     }
                     v.graphics.check(self).map_err(|e| format!("{who}: {e}"))?;
+                    if let Some(b) = &v.section_box {
+                        section_box_ok(&who, b)?;
+                    }
                     if !view_names.insert(v.name.as_str()) {
                         return Err(format!("{who}: another view is already named `{}`", v.name));
                     }
@@ -4036,6 +4508,7 @@ impl Model {
                         boundary(&format!("{who} courtyard {i}"), c)?;
                     }
                     holes(&who, "courtyard", &r.boundary, &r.courtyards)?;
+                    crate::sketch::check(&who, &r.sketch)?;
                     self.roof_pieces(r).map_err(|e| format!("{who}: {e}"))?;
                 }
                 Element::Sheet(sh) => {
@@ -4102,13 +4575,17 @@ impl Model {
         if let Some(n) = view_names.intersection(&level_names).next() {
             return Err(format!("a view is named `{n}`, as a level is; name it otherwise"));
         }
-        for (host, mut v) in spans {
-            v.sort_by(|x, y| x.0.total_cmp(&y.0));
-            for pair in v.windows(2) {
-                if let [(_, end, a), (start, _, b)] = pair
-                    && *end > start + TOL
-                {
-                    return Err(format!("{} {a} and {} {b} overlap in wall {host}", self.cat(*a), self.cat(*b)));
+        for (host, v) in spans {
+            // Openings share a wall's place only where they share its height too: one over the other is not an overlap, and a
+            // storefront wall with a window a storey is a wall whose windows overlap in plan alone.
+            for (i, a) in v.iter().enumerate() {
+                for b in v.iter().skip(i + 1) {
+                    if b.start > a.end + TOL {
+                        break;
+                    }
+                    if a.end > b.start + TOL && a.head > b.sill + TOL && b.head > a.sill + TOL {
+                        return Err(format!("{} {} and {} {} overlap in wall {host}", self.cat(a.id), a.id, self.cat(b.id), b.id));
+                    }
                 }
             }
         }
@@ -4131,6 +4608,20 @@ pub fn culprit(error: &str) -> Option<Id> {
 
 fn coord(what: &str, v: f64) -> Result<(), String> {
     if v.is_finite() && v.abs() <= MAX_COORD { Ok(()) } else { Err(format!("{what}: {v} is not a usable number")) }
+}
+
+/// Whether `b` is a section box: usable numbers, and some room between its planes on each axis.
+fn section_box_ok(who: &str, b: &SectionBox) -> Result<(), String> {
+    for (axis, (lo, hi)) in ["x", "y", "z"].into_iter().zip(b.min.into_iter().zip(b.max)) {
+        coord(&format!("{who} section box {axis}"), lo)?;
+        coord(&format!("{who} section box {axis}"), hi)?;
+        if hi - lo < MIN_SECTION_BOX {
+            return Err(format!(
+                "{who}: its section box runs from {lo} to {hi} mm in {axis}; its max is at least {MIN_SECTION_BOX} mm past its min on each axis"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Whether `r` is a view range that makes sense: usable numbers running top ≥ cut plane ≥ bottom ≥
@@ -4159,6 +4650,21 @@ fn size(what: &str, v: f64) -> Result<(), String> {
 fn point(who: &str, p: P2) -> Result<(), String> {
     coord(&format!("{who} x"), p.0)?;
     coord(&format!("{who} y"), p.1)
+}
+
+/// `n` more members placed in `view` (by a detail group or a repeating detail), of the `placed` already: an error naming
+/// `who` when the view would draw more than [`crate::groups::MAX_PLACED`] of them.
+fn placing(who: &str, placed: &mut BTreeMap<Guid, usize>, view: Guid, n: usize) -> Result<(), String> {
+    let total = placed.entry(view).or_default();
+    *total = total.saturating_add(n);
+    match *total > crate::groups::MAX_PLACED {
+        true => Err(format!(
+            "{who}: its view would draw {total} group members (a group places each of its type's members, a repeating detail \
+             once for each repeat); a view draws up to {}, so use fewer repeats or a smaller group",
+            crate::groups::MAX_PLACED
+        )),
+        false => Ok(()),
+    }
 }
 
 /// A crop region from its corner `a` to `b`: finite, and `a` south-west of `b` (in a section, below
@@ -4317,6 +4823,16 @@ fn pens_from_pixels(v: &mut serde_json::Value) {
         _ => {}
     }
 }
+/// A door's or a window's place in its wall: how far along it the opening runs, the sill and the head above
+/// the wall's own base, and which opening it is.
+struct OpeningSpan {
+    start: f64,
+    end: f64,
+    sill: f64,
+    head: f64,
+    id: Id,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4449,6 +4965,27 @@ mod tests {
         m.insert(door(m.guid(host), 2000.0));
         assert_eq!(m.check(), Ok(()));
         m.insert(door(m.guid(host), 2600.0));
+        let e = m.check().unwrap_err();
+        assert!(e.contains("overlap"), "{e}");
+    }
+
+    #[test]
+    fn check_allows_openings_stacked_in_one_wall_and_still_refuses_ones_side_by_side() {
+        // A wall six metres tall with a door and, over it, another: the Snowdon sample's storefront walls hold a window per
+        // storey at the same place along the wall.
+        let mut m = Model::new("t");
+        let host = m.insert(wall(m.guid(100000), P2(0.0, 0.0), P2(5000.0, 0.0)));
+        if let Some(Element::Wall(w)) = m.elements.get_mut(host) {
+            w.height = 6000.0;
+        }
+        m.insert(door(m.guid(host), 1000.0));
+        let mut above = door(m.guid(host), 1000.0);
+        if let Element::Door(o) = &mut above {
+            o.sill = 2500.0;
+        }
+        m.insert(above);
+        assert_eq!(m.check(), Ok(()), "openings that share their place but not their height do not overlap");
+        m.insert(door(m.guid(host), 1000.0));
         let e = m.check().unwrap_err();
         assert!(e.contains("overlap"), "{e}");
     }

@@ -791,7 +791,7 @@ const WORDS: &[[&str; 4]] = &[
         "Mostrar u ocultar las paletas y elegir el idioma de la interfaz",
         "Hiện hoặc ẩn các bảng, và chọn ngôn ngữ của giao diện",
     ],
-    ["Project Browser", "Navegador de projeto", "Navegador de proyectos", "Trình duyệt dự án"],
+    ["Project Browser", "Navegador de projeto", "Navegador de proyectos", "Project Browser"],
     ["Language", "Idioma", "Idioma", "Ngôn ngữ"],
     ["Project Units", "Unidades do projeto", "Unidades del proyecto", "Đơn vị dự án"],
     [
@@ -2753,7 +2753,7 @@ const WORDS: &[[&str; 4]] = &[
         "Nạp cấu kiện: một cấu kiện được lưu thành tệp .json, của riêng BIMCraft",
     ],
     ["BIMCraft family", "Família do BIMCraft", "Familia de BIMCraft", "Cấu kiện BIMCraft"],
-    ["Families", "Famílias", "Familias", "Cấu kiện mẫu"],
+    ["Families", "Famílias", "Familias", "Cấu kiện"],
     ["Materials and Finishes", "Materiais e acabamentos", "Materiales y acabados", "Vật liệu và lớp hoàn thiện"],
     ["Material:", "Material:", "Material:", "Vật liệu:"],
     [

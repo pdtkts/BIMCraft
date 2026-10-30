@@ -300,15 +300,15 @@ msgstr "Kích thước thẳng hàng"
 msgid "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, then click where the dimension line goes"
 msgstr "Kích thước thẳng hàng (DI): chọn các mặt tường song song, đầu tường, cửa đi, cửa sổ hoặc trục, rồi bấm vào nơi đường kích thước đi qua"
 
-#: crates/ui-egui/src/browser.rs:41
-#: crates/ui-egui/src/cad.rs:100
-msgid "All"
-msgstr "Tất cả"
-
 #: crates/ui-egui/src/lib.rs:328
 #: crates/ui-egui/src/properties.rs:2171
 msgid "Alignment Guides"
 msgstr "Các đường căn chỉnh"
+
+#: crates/ui-egui/src/browser.rs:41
+#: crates/ui-egui/src/cad.rs:100
+msgid "All"
+msgstr "Tất cả"
 
 #: crates/ui-egui/src/control.rs:206
 msgid "An agent can work on this project: bimcraft-cli mcp --connect {}"
@@ -4770,10 +4770,6 @@ msgstr "Đã tìm thấy bản sao phục hồi"
 msgid "Recovery copy: {}"
 msgstr "Bản sao phục hồi: {}"
 
-#: crates/ui-egui/src/structure.rs:103
-msgid "Reinforce"
-msgstr "Gia cố"
-
 #: crates/core/src/draw.rs:104
 msgid "Rectangle"
 msgstr "Hình chữ nhật"
@@ -4818,6 +4814,10 @@ msgstr "Kiểu vùng"
 #: crates/ui-egui/src/fillpatterns.rs:29
 msgid "Region Types"
 msgstr "Các kiểu vùng"
+
+#: crates/ui-egui/src/structure.rs:103
+msgid "Reinforce"
+msgstr "Gia cố"
 
 #: crates/ui-egui/src/browser.rs:467
 msgid "Reload"

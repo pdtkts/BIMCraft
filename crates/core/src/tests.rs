@@ -1355,14 +1355,14 @@ fn a_new_project_comes_with_a_library_of_families() {
         let names: Vec<&str> = m.families.keys().map(String::as_str).collect();
         assert_eq!(
             names.len(),
-            10 + 4 + crate::fixtures::library(language).len(),
-            "{names:?}: furniture, fittings, a door's and a window's of two kinds each, and the tabs' fixtures"
+            10 + 6 + crate::fixtures::library(language).len(),
+            "{names:?}: furniture, fittings, a door's and a window's of three kinds each, and the tabs' fixtures"
         );
         // Every type of every family places and builds: a component's as one, a door's or a window's in a wall's opening.
         let mut s = Session::new();
         s.reset(m.clone(), None);
-        run(&mut s, "wall", json!({"points": [[-20000, 5000], [20000, 5000]]}));
-        let mut along = -15000.0;
+        run(&mut s, "wall", json!({"points": [[-30000, 5000], [30000, 5000]]}));
+        let mut along = -27500.0;
         for (family, f) in &m.families {
             for t in f.types.keys().filter(|_| f.category.hosted()) {
                 let kind = if f.category == crate::family::Category::Door { "door" } else { "window" };
@@ -1500,6 +1500,13 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!("x"),
         json!({"points": "x"}),
         json!({"points": [[0, 0]]}),
+        json!({"points": [[0, 0, 0], [1000, 0, 0]], "diameter": 12, "count": 1000, "step": [1e9, 1e9, 1e9]}),
+        json!({"points": [[0, 0, 0], [1000, 0, 0]], "diameter": f64::MAX, "count": 1e300}),
+        json!({"points": [[0, 0, 0], [1000, 0, 0]], "diameter": 12, "host": 100000, "level": [], "grade": 5}),
+        json!({"host": 100002, "cover": 25, "bottom": {"count": 1e300, "diameter": 1e300}, "stirrup": {"diameter": 5, "spacing": 1e-300}}),
+        json!({"host": 100002, "cover": [], "bars": {"diameter": 16, "x": 1e300}, "mesh": {"x": {"diameter": 8, "spacing": -1}}, "anchor": {"below": 1e300}}),
+        json!({"host": 100002, "cover": {"top": 1e300, "bottom": -1, "sides": "x"}, "bottom": {"x": {"diameter": 8, "spacing": 5e-324}}, "stirrup": 5}),
+        json!({"host": 100002, "cover": 25, "stirrup": {"diameter": 5, "spacing": 150, "ends": {"length": 1e300, "spacing": 1}, "hook": 1e300}, "skin": {"diameter": 8, "spacing": 1e-9}}),
         json!({"points": [[0, 0], [1e308, 1e308]]}),
         json!({"points": [[0, 0], [-1e300, 0]], "closed": true}),
         json!({"at": [1e300, -1e300]}),
@@ -1578,6 +1585,19 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"kind": "angular", "refs": [{"id": 100002}, {"id": 100003}, {"id": 100005}], "at": [0, 0]}),
         json!({"kind": "radial", "refs": [{"id": 100002}], "at": [0, 0]}),
         json!({"kind": 7, "refs": [{"id": 100002}, {"id": 100003, "face": "end"}], "at": [0, 0]}),
+        json!({"kind": "linear", "orient": "up", "refs": [{"id": 100002, "point": "start"}, {"id": 100003, "point": "end"}], "at": [0, 0]}),
+        json!({"kind": "linear", "refs": [{"id": 100002, "point": "middle"}, {"endpoint": [1e300, 0]}], "at": [f64::MAX, 0]}),
+        json!({"refs": [{"endpoint": "x"}, {"endpoint": [0, 0], "id": 1}], "at": [0, 0], "type": "", "prefix": 5}),
+        json!({"kind": "diameter", "refs": [[0, 0]], "at": [0, 0], "above": "a\nb", "equality": "x"}),
+        json!({"kind": "arc_length", "refs": [{"id": 100002, "face": "start"}], "at": [1e300, 1e300]}),
+        json!({"name": "D", "tick": "star", "tick_size": 1e300, "text_size": -1, "decimals": 300, "units": "furlong"}),
+        json!({"name": "D", "like": "nope", "witness": 5, "line_pen": 99, "color": "x", "font": "", "string": []}),
+        json!({"name": "Diagonal - 2.5mm Arial", "rename": "Arrow - 2.5mm Arial", "delete": "x", "unknown": 1}),
+        json!({"name": "Arrow - 2.5mm Arial", "delete": true}),
+        json!({"id": 100007, "segment": 1e300, "prefix": "x", "below": 5}),
+        json!({"id": 100007, "segment": -1, "replace": "a\nb", "nope": 1}),
+        json!({"id": 100007, "equal": "x", "locked": [1e300, -1, "a"]}),
+        json!({"id": 100007, "equal": true, "locked": [0, 0, 1]}),
         json!({"sheet": "A101", "view": "Room Schedule", "scale": -1}),
         json!({"sheet": "A101", "view": "{3D}", "azimuth": 1e300, "elevation": 90}),
         json!({"id": 100000, "name": "{3D}"}),
@@ -1595,6 +1615,11 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"category": "wall", "name": "Generic - 200mm", "layers": [{"thickness": 5, "material": "x", "extra": 1}]}),
         json!({"name": "M", "color": "#zzzzzz", "cut": 5, "surface": "brick", "rename": "", "delete": "yes"}),
         json!({"name": "Brick", "rename": "Brick", "color": [1, 2]}),
+        json!({"name": "Glass", "transparency": 101}),
+        json!({"name": "Glass", "transparency": -5}),
+        json!({"name": "Glass", "transparency": 1e300}),
+        json!({"name": "Glass", "transparency": "x"}),
+        json!({"name": "Glass", "transparency": 50}),
         json!({"category": "floor", "name": "F", "layers": [{"thickness": 1e300, "material": "Concrete"}]}),
         json!({"category": "roof", "name": "R", "layers": [{"thickness": 0, "function": "membrane"}]}),
         json!({"category": "ceiling", "name": "C", "layers": "x", "grid": -5}),
@@ -1919,7 +1944,7 @@ fn text_notes_go_in_plans_sections_and_sheets() {
     run(&mut s, "sheet", json!({}));
     let cut = run(&mut s, "text", json!({"text": "Insulated", "at": [500, 2500], "view": "Section 1", "leader": [1000, 1500]}));
     assert_eq!(element(&mut s, cut["id"].as_u64().unwrap())["leader"], json!([1000.0, 1500.0]));
-    run(&mut s, "text", json!({"text": "General notes", "at": [30, 280], "view": "A101", "size": 5}));
+    run(&mut s, "text", json!({"text": "General notes", "at": [30, 280], "view": "A101", "type": "5mm"}));
     for (p, what) in [
         (json!({"text": " ", "at": [0, 0]}), "text"),
         (json!({"text": "x", "at": [0, 0], "view": "Nowhere"}), "Nowhere"),
@@ -2648,9 +2673,83 @@ fn ifc_files_from_other_tools_come_in_measured_from_their_geometry() {
     let room = room.unwrap();
     assert_eq!((room.name.as_str(), room.number.as_str(), m.level(room.level).map(|l| l.name.as_str())), ("Office", "101", Some("First")));
     assert!((1000.0..5000.0).contains(&room.point.0) && (2000.0..3900.0).contains(&room.point.1), "{:?}", room.point);
+    // A tag that is only the element's id, as Revit writes it, is no mark: the window is numbered.
+    let marks: Vec<&str> =
+        m.elements.values().filter_map(|e| if let crate::model::Element::Window(o) = e { Some(o.mark.as_str()) } else { None }).collect();
+    assert_eq!(marks, ["1"]);
     // What BIMCraft has no element for is left out, and said so.
     let skipped = r["skipped"].to_string();
     assert!(skipped.contains("IFCFURNISHINGELEMENT"), "{skipped}");
+}
+
+#[test]
+fn marks_number_on_in_the_series_they_are_in() {
+    use crate::commands::next_number;
+    let next = |taken: &[&str]| next_number(taken.iter().copied());
+    assert_eq!(next(&[]), "1");
+    assert_eq!(next(&["1", "2", "7"]), "8");
+    // A prefix two marks share is a series; padding is kept.
+    assert_eq!(next(&["P1", "P2", "P5"]), "P6");
+    assert_eq!(next(&["J-01", "J-02", "J-09"]), "J-10");
+    // A lone prefixed mark among numbered ones, or fewer than them, is an exception.
+    assert_eq!(next(&["D2"]), "1");
+    assert_eq!(next(&["D2", "1"]), "2");
+    assert_eq!(next(&["P1", "P2", "1", "2", "3"]), "4");
+    // The bigger series wins; never a mark already taken; text with no number is no series.
+    assert_eq!(next(&["P1", "P2", "P3", "J1", "J2"]), "P4");
+    assert_eq!(next(&["P01", "P02", "P3"]), "P04");
+    assert_eq!(next(&["Entry", "Back"]), "1");
+}
+
+#[test]
+fn a_tag_of_a_long_run_of_zeros_starts_no_series_and_pads_no_further_than_a_name_goes() {
+    use crate::commands::next_number;
+    use crate::model::MAX_TEXT;
+    // A hostile file's tags, `P`, zeros and a number, longer than any name: ignored, not padded to.
+    let hostile = [format!("P{}1", "0".repeat(MAX_TEXT)), format!("P{}2", "0".repeat(MAX_TEXT))];
+    assert_eq!(next_number(hostile.iter().map(String::as_str)), "1");
+    // One that fits is a series as ever, and its next is no longer than it.
+    let fits = [format!("P{}1", "0".repeat(MAX_TEXT - 3)), format!("P{}2", "0".repeat(MAX_TEXT - 3))];
+    assert_eq!(next_number(fits.iter().map(String::as_str)), format!("P{}3", "0".repeat(MAX_TEXT - 3)));
+}
+
+#[test]
+fn doors_and_windows_keep_their_marks_through_ifc_and_new_ones_follow_the_series() {
+    let mut s = Session::new();
+    house(&mut s);
+    s.script(
+        r#"door {"at": [1000, 0], "mark": "P1"}
+           door {"at": [3000, 0], "mark": "P2"}
+           window {"at": [8000, 2000], "mark": "J1"}
+           window {"at": [8000, 4000], "mark": "J2"}"#,
+    )
+    .unwrap();
+    // The next door and window carry on their series, and so does a copy.
+    assert_eq!(run(&mut s, "door", json!({"at": [5000, 0]}))["mark"], "P3");
+    let window = run(&mut s, "window", json!({"at": [4000, 6000]}));
+    assert_eq!(window["mark"], "J3");
+    let copy = run(&mut s, "copy", json!({"ids": [window["id"]], "by": [-2000, 0]}))["ids"][0].as_u64().unwrap();
+    assert_eq!(element(&mut s, copy)["mark"], "J4");
+    // Out to IFC and back: each keeps its tag; one with no tag is numbered on after the rest.
+    let marks = |m: &Model| {
+        let mut all: Vec<String> = m
+            .elements
+            .values()
+            .filter_map(|e| match e {
+                crate::model::Element::Door(o) | crate::model::Element::Window(o) => Some(o.mark.clone()),
+                _ => None,
+            })
+            .collect();
+        all.sort();
+        all
+    };
+    let file = crate::ifc::export(&s.model);
+    let back = crate::import::ifc(file.as_bytes(), "t").unwrap();
+    assert_eq!(marks(&back.model), marks(&s.model));
+    let untagged = file.replacen(",'P2',", ",$,", 1);
+    assert_ne!(untagged, file);
+    let back = crate::import::ifc(untagged.as_bytes(), "t").unwrap();
+    assert_eq!(marks(&back.model), ["J1", "J2", "J3", "J4", "P1", "P3", "P4"]);
 }
 
 #[test]
@@ -2792,6 +2891,24 @@ fn a_project_in_vietnamese_names_what_it_makes_in_vietnamese_and_keeps_it_in_a_f
     assert!(s.execute("language", &json!({"code": "klingon"})).unwrap_err().contains("vi"));
 }
 
+#[test]
+fn a_project_in_swedish_names_what_it_makes_in_swedish() {
+    let mut s = Session::new();
+    run(&mut s, "new", json!({"language": "sv"}));
+    let i = run(&mut s, "inspect", json!({}));
+    assert_eq!([&i["name"], &i["levels"][1]["name"], &i["language"]], [&json!("Projekt"), &json!("Nivå 2"), &json!("sv")]);
+    house(&mut s);
+    assert_eq!(run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["name"], "Sektion 1");
+    let ids = run(&mut s, "elevation", json!({}))["ids"].clone();
+    let names: Vec<Value> = ids.as_array().unwrap().iter().map(|id| element(&mut s, id.as_u64().unwrap())["name"].clone()).collect();
+    assert_eq!(names, ["Norr", "Söder", "Öster", "Väster"]);
+    let room = run(&mut s, "room", json!({"point": [4000, 3000]}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, room)["name"], "Rum");
+    run(&mut s, "sheet", json!({}));
+    let vp = run(&mut s, "place", json!({"sheet": "A101", "view": "rumsförteckning"}))["id"].as_u64().unwrap();
+    assert_eq!(element(&mut s, vp)["title"], "Rumsförteckning");
+}
+
 /// A cavity wall type, outside in: brick, insulation, block and plaster, 300 mm in all; its
 /// insulation a material of its own.
 fn cavity(s: &mut Session) {
@@ -2841,7 +2958,7 @@ fn walls_stand_on_their_location_line_with_their_exterior_to_the_left() {
     let w = run(&mut s, "wall", json!({"points": [[0, 0], [5000, 0]], "type": "Cavity 300", "location": "exterior-finish"}))["ids"][0]
         .as_u64()
         .unwrap();
-    let y = |s: &Session, face: Face| s.model.reference_line(&Reference { id: s.model.guid(w), face }).unwrap().0.1;
+    let y = |s: &Session, face: Face| s.model.reference_line(&Reference::line(s.model.guid(w), face)).unwrap().0.1;
     assert_eq!([y(&s, Face::Left), y(&s, Face::Centre), y(&s, Face::Right)], [0.0, -150.0, -300.0]);
     // Put on its core's interior face, it stays where it is.
     run(&mut s, "modify", json!({"id": w, "location": "interior-core"}));
@@ -3448,6 +3565,18 @@ fn layers_pick_their_materials_from_the_projects_library() {
     assert_eq!(oak["material"], json!({"color": [160, 112, 60], "cut": "diagonal", "surface": "none"}));
     let oak = run(&mut s, "material", json!({"name": "Oak", "surface": "horizontal", "color": [150, 100, 50]}));
     assert_eq!(oak["material"], json!({"color": [150, 100, 50], "cut": "diagonal", "surface": "horizontal"}));
+    // A material's transparency, percent: kept, cleared, and refused past 100.
+    let glass = run(&mut s, "material", json!({"name": "Oak", "transparency": 40}));
+    assert_eq!(glass["material"]["transparency"], 40);
+    assert_eq!(s.model.materials["Oak"].transparency, 40);
+    let glass = run(&mut s, "material", json!({"name": "Oak", "transparency": 0}));
+    assert!(glass["material"].get("transparency").is_none(), "{glass}");
+    for bad in [json!(101), json!(-1), json!(2.5), json!("x"), json!(1e300)] {
+        let e = s.execute("material", &json!({"name": "Oak", "transparency": bad})).unwrap_err();
+        assert!(e.contains("transparency"), "{bad}: {e}");
+    }
+    assert_eq!(s.model.materials["Oak"].transparency, 0);
+    assert!(s.model.materials["Glass"].transparency > 0, "the starter glass is see-through");
     // Layers name one of its materials, or none.
     let floor = |m: &str| json!({"category": "floor", "name": "Oak floor", "layers": [{"function": "finish", "material": m, "thickness": 20}, {"thickness": 180}]});
     let e = s.execute("type", &floor("Oke")).unwrap_err();
@@ -3660,6 +3789,29 @@ fn materials_and_layers_go_to_ifc_and_come_back() {
 }
 
 #[test]
+fn a_materials_transparency_goes_to_ifc_in_its_surface_style_and_comes_back() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "material", json!({"name": "Tint", "color": "#a0c0e0", "transparency": 40}));
+    run(&mut s, "material", json!({"name": "Paint", "color": "#a0703c"}));
+    run(
+        &mut s,
+        "type",
+        json!({"category": "floor", "name": "Tinted", "layers": [{"material": "Tint", "thickness": 20}, {"material": "Paint", "thickness": 180}]}),
+    );
+    run(&mut s, "floor", json!({"type": "Tinted"}));
+    let path = temp("transparency.ifc");
+    run(&mut s, "save", json!({"path": path}));
+    let ifc = std::fs::read_to_string(&path).unwrap();
+    assert!(ifc.contains("IFCSURFACESTYLESHADING(#") && ifc.contains(",0.4)"), "{ifc}");
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": path}));
+    let m = &t.model.materials;
+    assert_eq!((m["Tint"].transparency, m["Paint"].transparency), (40, 0));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn a_project_from_before_the_library_brings_its_layers_materials_into_it() {
     let mut s = Session::new();
     cavity(&mut s);
@@ -3687,8 +3839,10 @@ fn a_new_project_has_doors_and_windows_of_its_own_that_build_in_every_language()
         for (english, kind) in [
             ("Single Door", crate::family::Category::Door),
             ("Double Door", crate::family::Category::Door),
+            ("Sliding Door", crate::family::Category::Door),
             ("Fixed Window", crate::family::Category::Window),
             ("Casement Window", crate::family::Category::Window),
+            ("Sliding Window", crate::family::Category::Window),
         ] {
             assert!(hosted.contains(&(named(english).as_str(), kind)), "{l:?}: {english} in {hosted:?}");
         }
@@ -3832,6 +3986,82 @@ fn a_family_door_flipped_either_way_keeps_its_forms_turned_out_and_the_same_size
             assert!((a - b).abs() < 1e-6 * a, "facing {facing}, hand {hand}: {a} against {b}");
         }
     }
+}
+
+#[test]
+fn sliding_doors_and_windows_say_how_they_open_in_ifc_and_in_schedules() {
+    let mut s = Session::new();
+    s.script(
+        r#"wall {"points": [[0,0],[8000,0],[8000,6000],[0,6000]], "closed": true}
+           door {"at": [2000, 0], "family": "Sliding Door", "type": "2000 x 2100"}
+           door {"at": [5500, 0], "family": "Double Door"}
+           window {"at": [8000, 3000], "family": "Sliding Window"}
+           window {"at": [4000, 6000], "family": "Casement Window"}"#,
+    )
+    .unwrap();
+    let doors: Vec<u64> = run(&mut s, "elements", json!({"category": "door"}))["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(element(&mut s, doors[0])["operation"], "sliding");
+    // Out to IFC: a sliding door slides toward its hand, a double door is a double door, a window of two leaves two panels.
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains(".SLIDING_TO_LEFT.") && file.contains(".DOUBLE_DOOR_SINGLE_SWING."), "door operations");
+    assert_eq!(file.matches(".DOUBLE_PANEL_VERTICAL.").count(), 2, "both windows have two leaves");
+    run(&mut s, "modify", json!({"id": doors[0], "flip_hand": true}));
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains(".SLIDING_TO_RIGHT."));
+    // Back in, a door keeps how it opens and to which side, on a type of its own.
+    let back = crate::import::ifc(file.as_bytes(), "t").unwrap();
+    let mut t = Session::new();
+    t.reset(back.model, None);
+    let ops: Vec<(Option<crate::model::Operation>, bool)> = t
+        .model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            crate::model::Element::Door(o) => Some((t.model.opening_type(e).and_then(|k| k.operation), o.flip_hand)),
+            _ => None,
+        })
+        .collect();
+    use crate::model::Operation::{DoubleSwing, Sliding};
+    assert!(ops.contains(&(Some(Sliding), true)) && ops.contains(&(Some(DoubleSwing), false)), "{ops:?}");
+    // Where the door says nothing, its type does: an IfcDoorType's (IFC4) operation, as Revit writes it.
+    let door = file.lines().find(|l| l.contains("=IFCDOOR(") && l.contains(".SLIDING_TO_RIGHT.")).unwrap();
+    let door_ref = door.split('=').next().unwrap();
+    let typed = file.replacen(".SLIDING_TO_RIGHT.,$)", "$,$)", 1).replacen(
+        "ENDSEC;\nEND-ISO",
+        &format!(
+            "#999990=IFCDOORTYPE('0000000000000000000T01',$,'Patio',$,$,$,$,$,$,.DOOR.,.SLIDING_TO_LEFT.,.F.,$);\n\
+             #999991=IFCRELDEFINESBYTYPE('0000000000000000000T02',$,$,$,({door_ref}),#999990);\nENDSEC;\nEND-ISO"
+        ),
+        1,
+    );
+    assert!(!typed.contains(".SLIDING_TO_RIGHT.") && typed.contains("IFCDOORTYPE"));
+    let back = crate::import::ifc(typed.as_bytes(), "t").unwrap();
+    let patio = back.model.types.door.get("Patio").copied();
+    assert_eq!(patio.and_then(|k| k.operation), Some(Sliding), "{:?}", back.model.types.door);
+    // A schedule says it in the project's language.
+    let r =
+        run(&mut s, "schedule", json!({"name": "Esquadrias", "category": "doors", "fields": ["Family", "Operation"], "sort": ["Family"]}));
+    assert_eq!(r["rows"], json!([["Double Door", "Double Swing"], ["Sliding Door", "Sliding"]]));
+    let mut pt = Session::new();
+    pt.reset(Model::new_in("x", crate::language::Language::Portuguese), None);
+    pt.script(
+        r#"wall {"points": [[0,0],[8000,0]]}
+           door {"at": [2000, 0], "family": "Porta de correr"}"#,
+    )
+    .unwrap();
+    let r = run(&mut pt, "schedule", json!({"name": "Esquadrias", "category": "doors", "fields": ["Operation"]}));
+    assert_eq!(r["rows"], json!([["De correr"]]));
+    // A project's own type says it too; a name that isn't one is refused.
+    let made = run(&mut s, "type", json!({"category": "door", "name": "Correr 900", "width": 900, "height": 2100, "operation": "sliding"}));
+    assert_eq!(made["type"]["operation"], "sliding");
+    let e =
+        s.execute("type", &json!({"category": "door", "name": "Odd", "width": 900, "height": 2100, "operation": "spinning"})).unwrap_err();
+    assert!(e.contains("spinning") && e.contains("double-sliding"), "{e}");
 }
 
 #[test]
@@ -4975,43 +5205,43 @@ fn a_file_from_before_guids_opens_with_guids_and_six_digit_ids() {
 }
 
 #[test]
-fn a_project_is_saved_as_format_6_and_one_of_format_4_or_5_opens_as_it_is_and_one_of_format_7_is_refused() {
+fn a_project_is_saved_as_format_11_and_one_of_format_4_to_10_opens_as_it_is_and_one_of_format_12_is_refused() {
     use crate::model::Model;
     // 5 added the scans a project holds and the point clouds that place them; 6 added detailing (lines, regions, groups,
-    // repeating details, line and fill styles); 7 its CAD drawings and the imports that place them. Nothing in a file of 4, 5
-    // or 6 changes.
+    // repeating details, line and fill styles); 7 its CAD drawings and the imports that place them; 8 text types; 9 graphic line patterns; 10 dimensions to points and linear ones. Nothing in a file of 4
+    // to 7 that holds no notes changes.
     let mut s = Session::new();
     let empty = serde_json::to_value(&*s.model).unwrap();
     house(&mut s);
     run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 0]}));
     let full = serde_json::to_value(&*s.model).unwrap();
     for v in [&empty, &full] {
-        assert_eq!(v["format"], 7, "a project is saved as format 7");
-        for old in [4, 5, 6] {
+        assert_eq!(v["format"], 11, "a project is saved as format 11");
+        for old in [4, 5, 6, 7, 8, 9, 10] {
             let mut was = v.clone();
             was["format"] = json!(old);
             let (m, left_out) = Model::read(&was.to_string()).unwrap();
-            assert_eq!((m.format, left_out.len(), m.elements.len()), (7, 0, v["elements"].as_object().unwrap().len()));
+            assert_eq!((m.format, left_out.len(), m.elements.len()), (11, 0, v["elements"].as_object().unwrap().len()));
         }
     }
     assert!(full["elements"].as_object().unwrap().len() > 5);
     // A newer file says what it is and what to do, even when nothing else in it is wrong.
-    let mut eight = empty.clone();
-    eight["format"] = json!(8);
-    let e = Model::read(&eight.to_string()).unwrap_err();
+    let mut newer = empty.clone();
+    newer["format"] = json!(12);
+    let e = Model::read(&newer.to_string()).unwrap_err();
     assert!(
-        e.contains("newer BIMCraft") && e.contains("file format 8") && e.contains("reads up to 7") && e.contains("update BIMCraft"),
+        e.contains("newer BIMCraft") && e.contains("file format 12") && e.contains("reads up to 11") && e.contains("update BIMCraft"),
         "{e}"
     );
     // A file of this format with a field it doesn't know is read without it, and says which.
     let mut odd = full.clone();
     odd["something_new"] = json!(true);
     let (m, left_out) = Model::read(&odd.to_string()).unwrap();
-    assert_eq!((m.format, left_out), (7, vec!["/something_new".to_string()]));
+    assert_eq!((m.format, left_out), (11, vec!["/something_new".to_string()]));
 }
 
 #[test]
-fn a_format_5_file_that_holds_elements_and_scans_migrates_to_7_and_keeps_both() {
+fn a_format_5_file_that_holds_elements_and_scans_migrates_to_11_and_keeps_both() {
     use crate::model::Model;
     let mut s = Session::new();
     house(&mut s);
@@ -5023,13 +5253,13 @@ fn a_format_5_file_that_holds_elements_and_scans_migrates_to_7_and_keeps_both() 
     let mut file: serde_json::Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     file["format"] = json!(5);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (7, 1, 0, s.model.elements.len()));
-    // Written again, it says 7.
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 7);
-    // A file of 6 (detailing, no CAD drawings) opens as 7 likewise.
+    assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (11, 1, 0, s.model.elements.len()));
+    // Written again, it says 11.
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], 11);
+    // A file of 6 (detailing, no CAD drawings) opens as 10 likewise.
     file["format"] = json!(6);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
-    assert_eq!((m.format, left_out.len(), m.elements.len()), (7, 0, s.model.elements.len()));
+    assert_eq!((m.format, left_out.len(), m.elements.len()), (11, 0, s.model.elements.len()));
 }
 
 #[test]
@@ -5183,4 +5413,148 @@ fn room_separators_split_rooms_without_walls_and_survive_ifc() {
     let mut areas: Vec<f64> = rooms["elements"].as_array().unwrap().iter().filter_map(|r| r["area_m2"].as_f64()).collect();
     areas.sort_by(f64::total_cmp);
     assert_eq!(areas, vec![18.0, 30.0]);
+}
+
+#[test]
+fn a_separator_drawn_to_the_wall_faces_splits_rooms_measured_at_the_centre_lines_too() {
+    let mut s = Session::new();
+    house(&mut s);
+    let half = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap() / 2.0;
+    // Drawn from face to face, as on a plan, and one more at a slant from a face to the first line.
+    run(&mut s, "room_separator", json!({"points": [[5000, half], [5000, 6000.0 - half]]}));
+    run(&mut s, "room_separator", json!({"points": [[8000.0 - half, 4000.0 - half / 3.0], [5000, 3000]]}));
+    for (point, name) in [([2000, 3000], "Living"), ([7000, 1000], "Kitchen"), ([7000, 5500], "Pantry")] {
+        run(&mut s, "room", json!({"point": point, "name": name}));
+    }
+    let areas = |s: &mut Session| -> Vec<f64> {
+        run(s, "elements", json!({"category": "room"}))["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["area_m2"].as_f64())
+            .collect()
+    };
+    // At the centre lines: 5 m by 6 m, and the 3 m by 6 m rest cut by the slant from (8000, 4000) to (5000, 3000).
+    let centre = areas(&mut s);
+    let want = [30.0, 3.0 * 3.5, 3.0 * 2.5];
+    assert!(centre.iter().zip(want).all(|(a, w)| (a - w).abs() < 1e-6), "{centre:?}");
+    assert!((centre.iter().sum::<f64>() - 48.0).abs() < 1e-6);
+    // The lines themselves stay as drawn.
+    let lines = run(&mut s, "elements", json!({"category": "roomseparator"}));
+    assert_eq!(lines["elements"][0]["length"].as_f64(), Some(6000.0 - 2.0 * half));
+    // At the faces they split the same way, and the parts add up to the floor inside the walls.
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    let inside = (8000.0 - 2.0 * half) * (6000.0 - 2.0 * half) / 1e6;
+    assert!((areas(&mut s).iter().sum::<f64>() - inside).abs() < 1e-6, "{:?}", areas(&mut s));
+}
+
+#[test]
+fn rooms_measure_at_the_wall_centre_lines_or_at_their_faces() {
+    let mut s = Session::new();
+    house(&mut s);
+    let t = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap();
+    run(&mut s, "room", json!({"point": [4000, 3000], "name": "Living"}));
+    let area = |s: &mut Session| run(s, "elements", json!({"category": "room"}))["elements"][0]["area_m2"].as_f64().unwrap();
+    assert_eq!(run(&mut s, "room_area", json!({}))["at"], "centre", "as a project starts");
+    assert_eq!(area(&mut s), 48.0);
+    // At the faces: the floor inside the walls, half a wall in from each centre line.
+    assert_eq!(run(&mut s, "room_area", json!({"at": "finish"}))["at"], "finish");
+    let inside = (8000.0 - t) * (6000.0 - t) / 1e6;
+    assert!((area(&mut s) - inside).abs() < 1e-6, "{} vs {inside}", area(&mut s));
+    // A partition takes its faces too.
+    run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 6000]], "type": "Interior - 100mm"}));
+    let left = (5000.0 - t / 2.0 - 50.0) * (6000.0 - t) / 1e6;
+    assert!((area(&mut s) - left).abs() < 1e-6, "{} vs {left}", area(&mut s));
+    // It is kept with the project and undone like any change.
+    let file = serde_json::to_value(&*s.model).unwrap();
+    assert_eq!(file["room_area"], "finish");
+    assert!(s.execute("room_area", &json!({"at": "core"})).unwrap_err().contains("centre or finish"));
+    assert!(s.execute("room_area", &json!({"to": "finish"})).is_err());
+
+    // IFC: the space follows the setting; its quantities give both, gross at the centre lines and net at the faces.
+    let ifc = crate::ifc::export(&s.model);
+    assert!(ifc.contains("'Qto_SpaceBaseQuantities'"), "{ifc}");
+    let q = |name: &str| -> f64 {
+        let at = ifc.find(&format!("IFCQUANTITYAREA('{name}',$,$,")).unwrap_or_else(|| panic!("no {name}"));
+        let rest = &ifc[at..];
+        let v = rest.split(',').nth(3).unwrap();
+        v.parse().unwrap()
+    };
+    assert!((q("GrossFloorArea") - 30.0).abs() < 1e-6);
+    assert!((q("NetFloorArea") - left).abs() < 1e-4);
+    assert!(ifc.contains("IFCQUANTITYLENGTH('Height',$,$,3000.,$)"), "{ifc}");
+
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(area(&mut s), 48.0, "back at the centre lines");
+    assert!(serde_json::to_value(&*s.model).unwrap().get("room_area").is_none(), "a project at the centre lines doesn't say so");
+}
+
+#[test]
+fn rooms_measured_at_the_faces_stop_at_room_separators_too() {
+    let mut s = Session::new();
+    house(&mut s);
+    let t = run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["thickness"].as_f64().unwrap();
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    run(&mut s, "room_separator", json!({"points": [[5000, 0], [5000, 6000]]}));
+    let living = run(&mut s, "room", json!({"point": [2000, 3000], "name": "Living"}))["area_m2"].as_f64().unwrap();
+    let kitchen = run(&mut s, "room", json!({"point": [7000, 3000], "name": "Kitchen"}))["area_m2"].as_f64().unwrap();
+    // The line has no thickness: the two share the floor inside the walls between them.
+    let (left, right) = ((5000.0 - t / 2.0) * (6000.0 - t) / 1e6, (3000.0 - t / 2.0) * (6000.0 - t) / 1e6);
+    assert!((living - left).abs() < 1e-6 && (kitchen - right).abs() < 1e-6, "{living} {kitchen} vs {left} {right}");
+}
+
+#[test]
+fn technical_standards_configure_line_weights_sheets_and_styles() {
+    let mut s = Session::new();
+    house(&mut s);
+
+    // Initial inspection reports current standard
+    let r = run(&mut s, "standard", json!({}));
+    assert_eq!(r["standard"], "iso");
+    assert!(r["all"].as_array().unwrap().len() >= 4);
+
+    // Switch to NBR (ABNT / Brasil)
+    let nbr = run(&mut s, "standard", json!({"set": "nbr", "adapt_all": true}));
+    assert_eq!(nbr["standard"], "nbr");
+    assert_eq!(nbr["region"], "Brasil");
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Nbr);
+    assert_eq!(s.history(), ["Wall", "Technical Standards"]);
+
+    // Verify object styles adapted to NBR 6492
+    let wall_style = s.model.object_style("wall");
+    assert_eq!(wall_style.cut, crate::pen::Pen(10), "Cut wall is 0.50mm in NBR 6492");
+    let col_style = s.model.object_style("column");
+    assert_eq!(col_style.cut, crate::pen::Pen(12), "Cut structural column is 0.70mm in NBR 6492");
+
+    // Verify sheet margins follow NBR 16752 (25mm binding margin) and folding marks
+    let margins_a1 = s.model.standard().sheet_margins("A1");
+    assert_eq!(margins_a1.left, 25.0);
+    assert_eq!(margins_a1.title_width, 178.0);
+    assert!(margins_a1.folding_marks);
+
+    // Sheets can be created in both ISO and Arch/ANSI formats
+    let sh_a1 = run(&mut s, "sheet", json!({"name": "Planta Baixa", "size": "A1"}))["id"].as_u64().unwrap();
+    assert_eq!(s.model.sheet(sh_a1).unwrap().size, "A1");
+
+    // Switch to ANSI (United States)
+    let ansi = run(&mut s, "standard", json!({"set": "ansi", "adapt_all": true}));
+    assert_eq!(ansi["standard"], "ansi");
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Ansi);
+    assert_eq!(s.model.units, crate::units::Units::FeetInches, "ANSI adapts units to Imperial");
+
+    // Creating US Architectural sheet Arch D
+    let sh_arch_d = run(&mut s, "sheet", json!({"name": "Floor Plans", "size": "ARCH D"}))["id"].as_u64().unwrap();
+    assert_eq!(s.model.sheet(sh_arch_d).unwrap().size, "ARCH D");
+
+    // Drawing sheet works with both formats
+    let drawing = crate::sheet::draw(&s.model, sh_a1);
+    assert!(drawing.is_some());
+    let drawing_d = crate::sheet::draw(&s.model, sh_arch_d);
+    assert!(drawing_d.is_some());
+
+    // Undoing sheet then standard reverts back to NBR
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(s.model.standard(), crate::standards::TechnicalStandard::Nbr);
 }

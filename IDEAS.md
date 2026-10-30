@@ -80,7 +80,7 @@ DOC-12, DATA-02, MOD-21, QA-01, AI-07.
 | VIEW-07 | **Section box from selection**: select elements, one key, the 3D view crops to a box round them with handles on its six faces | Revit (Selection Box, BX), Navisworks | 2 | ●●● | Needs a crop box on `View3D` (geometry clipping in `view3d`) if there isn't one yet; grips as level extents do |
 | VIEW-08 | **Cutaway 3D by any plane**: cut the 3D view by a section's plane, a level's cut plane, or several planes at once, with cut faces filled in poché | Archicad (3D Cutaway), SketchUp section planes | 3 | ●●● | Capping the cut needs closed solids, which walls, slabs and family forms already are |
 | VIEW-09 | **3D documents**: a 3D view placed on a sheet with annotation (dimensions, labels) in the 3D view itself, so axonometric details print annotated | Archicad (3D Document) | 4 | ●● | Needs annotation in view coordinates of a projected view; a big win for construction details and assembly sequences |
-| VIEW-10 | **Perspective camera, walk-through and fly mode** | Every BIM tool | 3 | ●●● | On the roadmap with the GPU renderer; walk mode needs gravity onto floors and stair runs (`Model::floor_slabs`) |
+| VIEW-10 | **Perspective camera, walk-through and fly mode** | Every BIM tool | 3 | ●●● | The perspective camera is in (`perspective`, a lens and an eye height, on the processor and the card); walk mode needs gravity onto floors and stair runs (`Model::floor_slabs`) |
 | VIEW-11 | **Depth cueing** in elevations and sections: lines and fills fade with distance, in hidden line and shaded | Vectorworks 2026, Revit (elevations only) | 3 | ●● | Roadmap 0.7. `Drawing` items need their depth; in sections they already know their distance from the line |
 | VIEW-12 | **Zoom to selection and zoom to element by id** from the status bar or the command palette | Revit (partially) | 1 | ●● | Pairs with Manage > Inquiry |
 | VIEW-13 | **Linked views**: two views side by side whose selection, cursor crosshair and zoom centre follow each other (a plan and its 3D, a plan and a section) | Rhino viewports, Archicad (partially) | 3 | ●● | The selection is already the model's; the crosshair needs a point in model space from each view's `screen` |
@@ -316,7 +316,7 @@ more to say.
 | IO-11 | **COBie export** for facility handover | Revit (add-in), Archicad | 3 | ●● | COBie is a public IFC subset and spreadsheet format |
 | IO-12 | **Visual programming**: a node editor over BIMCraft's commands and queries, for parametric design without code | Dynamo, Grasshopper (Archicad live connection), Marionette | 5 | ●●● | Each node is a command or query; a graph is a script with data flow. Possibly a separate crate on top of `Session` |
 | IO-13 | **Grasshopper / Rhino.Inside-style live link**: an external parametric tool drives BIMCraft elements live | Archicad–Grasshopper, Rhino.Inside.Revit | 3 | ●● | MCP or a local socket already gives the transport |
-| IO-14 | **DWG** | Every commercial tool | 5 | ●● | Roadmap risk: no permissive library; DXF first |
+| IO-14 | **DWG** | Every commercial tool | 5 | ●● | Read through acadrust (MPL-2.0, unmodified; `crates/dwg`); writing still open |
 
 ## 13. Site and urban context
 
@@ -362,7 +362,7 @@ The disciplines' own plan is in [docs/disciplines.md](docs/disciplines.md); idea
 | Id | Idea | Seen in | Diff. | Value | Notes |
 |---|---|---|---|---|---|
 | DIS-01 | **Analytical model** from the physical one (nodes, members, panels, supports), exported to an open format for analysis tools | Revit, Archicad (SAF) | 4 | ●● | SAF (Structural Analysis Format) is an open xlsx-based format |
-| DIS-02 | **Rebar in concrete elements** by rules (cover, spacing, bar sizes), with bar schedules | Revit, Allplan, Tekla | 5 | ●● | |
+| DIS-02 | **Rebar generated in concrete elements** by rules (cover, spacing, bar sizes) for a beam, a column, a footing and a slab; bends and hooks; bars drawn in plans, and seen through their host in 3D; a Structure tab tool | Revit, Allplan, Tekla | 4 | ●● | Bars, their bar schedule, IFC, the 3D view and sections exist (`rebar`), and an Eberick IFC comes in with its marks, its cover and its short beams; `reinforce` puts bars in a beam, a column, a footing or a floor from the cover and the counts, diameters and spacings the engineer gives. Several hosts at once, hooks on a beam's and a column's bars, bars in plans and presets kept in the project exist. Round columns and footings, sloped floors, hooks on a slab's bars and on ties exist. What is left: bends other than a hook, round beams, bars beyond a section's cut seen through the concrete, and any rule from a standard. Rules from NBR 6118 raise the question of data from a paid standard, as the sizing pull requests do |
 | DIS-03 | **Fittings placed automatically** where runs meet (elbows, tees, reducers), from a routing preference per system | Revit (routing preferences), MEP Designer | 4 | ●●● | Fittings are families already; connectors at run ends are the new concept |
 | DIS-04 | **Pipe and duct sizing** by flow (fixture units for drainage, NBR 8160; velocity for supply) | DDScad, Revit | 3 | ●● | |
 | DIS-05 | **Circuits and load schedules**: devices assigned to circuits and panels, loads summed, panel schedule on a sheet | Revit, DDScad | 4 | ●●● | |

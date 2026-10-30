@@ -2,10 +2,11 @@
 //! the browser by their labels, keys. Each test then reads the model the session ended up with,
 //! or what the window shows.
 
+use crate::DimMode;
 use bimcraft_core::element_json;
 use bimcraft_core::engine::Session;
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::{Element, Guid, Id};
+use bimcraft_core::model::{DimKind, Element, Guid, Id};
 use bimcraft_core::pen::Pen;
 use bimcraft_core::sample::SAMPLE;
 use egui::accesskit::Role;
@@ -57,10 +58,13 @@ fn type_into(h: &mut Harness<BimApp>, label: &str, text: &str) {
     h.run();
 }
 
-/// Of the widgets named `name`, the one highest up: a view tab over the browser's entry, a
-/// ribbon tab over the tool of the same name.
+/// Of the widgets named `name`, a view tab, else the one highest up: a view tab over the browser's entry and over what a view
+/// under the tabs draws, a ribbon tab over the tool of the same name.
 fn topmost(h: &mut Harness<BimApp>, name: &str) {
-    let top = h.get_all_by_label(name).min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).map(|n| n.rect().center());
+    let tabs: Vec<egui::Rect> = h.state().tab_rects.iter().map(|(_, r)| *r).collect();
+    let tab = h.get_all_by_label(name).map(|n| n.rect()).find(|r| tabs.iter().any(|t| t.contains(r.center())));
+    let top = tab.map(|r| r.center());
+    let top = top.or_else(|| h.get_all_by_label(name).min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).map(|n| n.rect().center()));
     let pos = top.unwrap();
     h.hover_at(pos);
     for pressed in [true, false] {
@@ -704,7 +708,7 @@ fn typed_shortcuts_pick_tools_like_revit() {
     assert!(matches!(h.state().tool, Tool::Door));
     h.event(Event::Text("DI".into()));
     h.run();
-    assert!(matches!(h.state().tool, Tool::Dimension(_)));
+    assert!(matches!(h.state().tool, Tool::Dimension(..)));
     h.event(Event::Text("tg".into()));
     h.run();
     assert!(matches!(h.state().tool, Tool::Tag));
@@ -1691,7 +1695,7 @@ fn aligned_dimensions_pick_parallel_references_then_place_the_line() {
     click(&mut h, P2(4000.0, -1000.0));
     let dims = ids(&h, "dimension");
     assert_eq!((dims.len(), field(&h, dims[0], "values")), (1, json!([7800.0])));
-    assert_eq!(h.state().tool, Tool::Dimension(Vec::new()), "the tool stays on for the next one");
+    assert_eq!(h.state().tool, Tool::Dimension(DimMode::Aligned, Vec::new()), "the tool stays on for the next one");
     // A wall across the first isn't picked; centre lines are, where the cursor is on them.
     click(&mut h, P2(0.0, 3000.0));
     click(&mut h, P2(4000.0, 0.0));
@@ -1702,7 +1706,7 @@ fn aligned_dimensions_pick_parallel_references_then_place_the_line() {
     // Esc drops the references picked, then leaves the tool.
     click(&mut h, P2(0.0, 3000.0));
     key(&mut h, Key::Escape);
-    assert_eq!(h.state().tool, Tool::Dimension(Vec::new()));
+    assert_eq!(h.state().tool, Tool::Dimension(DimMode::Aligned, Vec::new()));
     key(&mut h, Key::Escape);
     assert_eq!(h.state().tool, Tool::Modify);
 }
@@ -2224,9 +2228,11 @@ fn text_notes_go_where_clicked_in_plans_sections_and_sheets() {
     press(&mut h, "Annotate");
     press(&mut h, "Text");
     assert!(h.query_by_label("Modify | Place Text").is_some());
-    // With nothing typed, a click says what's missing.
+    // With nothing typed in the Options Bar, a click opens the note on the canvas; left empty, it makes nothing.
     click(&mut h, P2(2000.0, 2000.0));
-    assert!(ids(&h, "text").is_empty() && h.state().status.error);
+    assert!(h.state().note_edit.is_some());
+    key(&mut h, Key::Escape);
+    assert!(ids(&h, "text").is_empty() && h.state().note_edit.is_none());
     type_into(&mut h, "Text:", "Tiled floor");
     click(&mut h, P2(2000.0, 2000.0));
     let notes = ids(&h, "text");
@@ -2504,7 +2510,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
     h.run();
     // The probe finds what it looks for: in English, the same labels are all English.
     assert!(english(&h, Lang::Spanish).contains(&"Architecture".to_string()));
-    for l in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::Chinese] {
+    for l in [Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::French, Lang::Chinese] {
         // A machine has the fonts it has: a window is told it has one for either of those that needs one.
         crate::lang::assume_chinese_font(&h.ctx);
         crate::lang::assume_vietnamese_font(&h.ctx);
@@ -3050,6 +3056,13 @@ fn the_materials_window_edits_the_projects_library() {
     h.run();
     press(&mut h, "Diagonal");
     assert_eq!(h.state().session.model.materials["Material 1"].cut, Pattern::Diagonal);
+    // How see-through it is, on its slider (a click on the slider's track, then its arrow keys).
+    assert_eq!(h.state().session.model.materials["Material 1"].transparency, 0);
+    h.get_by_label("Transparency").focus();
+    h.run();
+    key(&mut h, Key::ArrowRight);
+    key(&mut h, Key::ArrowRight);
+    assert_eq!(h.state().session.model.materials["Material 1"].transparency, 2);
     type_into(&mut h, "Name", "Oak");
     key(&mut h, Key::Enter);
     let m = &h.state().session.model.materials;
@@ -3339,6 +3352,76 @@ fn manage_snaps_switches_each_snap_and_the_angle_steps() {
     click(&mut h, P2(3470.0, 2020.0));
     key(&mut h, Key::Enter);
     assert_eq!(walls(&h)[0].1, P2(3470.0, 2020.0));
+}
+
+#[test]
+fn walls_drawn_near_alignment_guide_snap_to_other_walls_reference_points() {
+    let mut h = app("");
+    // First wall from (0, 0) to (5000, 0)
+    tool(&mut h, "Wall");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(5000.0, 0.0));
+    key(&mut h, Key::Enter);
+
+    // Second wall starting at (0, 3000)
+    tool(&mut h, "Wall");
+    click(&mut h, P2(0.0, 3000.0));
+    // Click near X = 5000 (e.g. 5005, 3000) within tolerance
+    click(&mut h, P2(5005.0, 3000.0));
+    key(&mut h, Key::Enter);
+
+    let w = walls(&h);
+    assert_eq!(w.len(), 2);
+    assert!(w[1].0.dist(P2(0.0, 3000.0)) < 1e-2);
+    // The second wall's endpoint snapped to exactly X = 5000.0 aligned with the first wall's endpoint
+    assert_eq!(w[1].1.0, 5000.0);
+    assert!((w[1].1.1 - 3000.0).abs() < 1e-2);
+}
+
+#[test]
+fn manage_snaps_toggles_alignment_guides() {
+    let mut h = app("");
+    assert!(h.state().snaps.alignment_guides);
+    press(&mut h, "Manage");
+    press(&mut h, "Snaps");
+    assert!(h.query_by_label("Alignment Guides").is_some());
+    pick(&mut h, Role::CheckBox, "Alignment Guides");
+    press(&mut h, "Close");
+    assert!(!h.state().snaps.alignment_guides);
+}
+
+#[test]
+fn grids_drawn_near_alignment_guide_snap_to_other_grids_reference_points() {
+    let mut h = app("");
+    // First grid from (0, 0) to (0, 5000)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(0.0, 5000.0));
+
+    // Second grid starting at (3000, 0)
+    tool(&mut h, "Grid");
+    click(&mut h, P2(3000.0, 0.0));
+    // Second point near (3000, 5003) aligned with Y=5000
+    click(&mut h, P2(3000.0, 5003.0));
+
+    let grid = ids(&h, "grid");
+    assert_eq!(grid.len(), 2);
+    assert_eq!(field(&h, grid[1], "start"), json!([3000.0, 0.0]));
+    assert_eq!(field(&h, grid[1], "end"), json!([3000.0, 5000.0]));
+}
+
+#[test]
+fn shortcut_toggles_alignment_guides() {
+    let mut h = app("");
+    assert!(h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(!h.state().snaps.alignment_guides);
+    key(&mut h, Key::F8);
+    assert!(h.state().snaps.alignment_guides);
+    shortcut(&mut h, "AG");
+    assert!(!h.state().snaps.alignment_guides);
+    shortcut(&mut h, "OG");
+    assert!(h.state().snaps.alignment_guides);
 }
 
 #[test]
@@ -5052,6 +5135,7 @@ fn the_family_editor_edits_a_family_says_what_wont_build_and_starts_a_new_one_of
     // Its top is drawn as an outline: click on its east edge.
     click(&mut h, P2(3800.0, 3000.0));
     assert_eq!(h.state().selection, [table]);
+    h.set_size(vec2(1800.0, 900.0));
     press(&mut h, "Manage");
     press(&mut h, "Edit Family");
     assert!(h.state().family_editor.is_some(), "the window is open on the table's family");
@@ -5186,6 +5270,7 @@ fn the_massing_tab_makes_floors_walls_a_floor_and_a_roof_from_the_selected_mass(
     assert_eq!(h.state().tool, Tool::Mass(Vec::new()));
 }
 
+mod align;
 mod autosave;
 mod browser;
 mod cad;
@@ -5193,6 +5278,7 @@ mod chinese;
 mod clouds;
 mod control;
 mod dialog;
+mod dimensions;
 mod dock;
 mod draw;
 mod fills;
@@ -5207,17 +5293,24 @@ mod lineweights;
 mod links;
 mod look;
 mod mep;
+mod notes;
 mod objectstyles;
 mod patterns;
+mod perspective;
 mod planviews;
+mod popup;
 mod purge;
+mod reinforce;
 mod revit;
 mod section_box;
 mod sketch;
 mod smallest;
+mod standards;
 mod start;
 mod titlebar;
 mod tools;
+mod trim;
+mod typeprops;
 mod vietnamese;
 mod window;
 
@@ -5840,6 +5933,8 @@ fn select_by_id_finds_elements_by_id_guid_or_ifc_globalid_says_what_it_missed_an
     let walls = ids(&h, "wall");
     let (high, low) = (walls[4], walls[1]);
     let ifc = bimcraft_core::ifc::compress(gid(&h, low).as_u128());
+    // Manage grew with Room Area Computation and Technical Standards: the ribbon folds Inquiry away in a narrower window.
+    h.set_size(vec2(1800.0, 900.0));
     press(&mut h, "Manage");
     press(&mut h, "Select by ID");
     // Live: what the list finds, and what it doesn't, as it is typed.
@@ -5997,4 +6092,22 @@ fn a_view_tabs_close_button_is_part_of_its_tab() {
     assert!(tab.contains_rect(close), "the × is inside the tab: {tab:?} {close:?}");
     press(&mut h, "Close {3D}");
     assert!(!h.state().views.contains(&Sheet::View3D));
+}
+
+/// Manage > Room Area Computation: the button drops the two choices down, a pick sets the project's `room_area` through the command,
+/// and undo puts it back.
+#[test]
+fn room_area_computation_is_set_from_manage_and_undone() {
+    use bimcraft_core::model::RoomArea;
+    let mut h = app(BOX);
+    h.state_mut().tab = Tab::Manage;
+    h.run();
+    assert_eq!(h.state().session.model.room_area, RoomArea::Centre);
+    press(&mut h, "Room Area Computation");
+    assert!(h.query_by_label("At wall centre line").is_some(), "both choices are on screen");
+    press(&mut h, "At wall finish");
+    assert_eq!(h.state().session.model.room_area, RoomArea::Finish);
+    h.state_mut().run("undo", json!({}));
+    h.run();
+    assert_eq!(h.state().session.model.room_area, RoomArea::Centre);
 }

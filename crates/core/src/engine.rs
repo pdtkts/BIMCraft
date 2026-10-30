@@ -77,6 +77,8 @@ pub struct Session {
     redo: Vec<(Step, Arc<Model>)>,
     /// How many times the project was replaced, so a transaction knows its history went with it.
     resets: usize,
+    /// What reads a DWG drawing, when the app has one (`cad::DwgReader`); none says to save it as DXF.
+    pub dwg: Option<crate::cad::DwgReader>,
 }
 
 impl Default for Session {
@@ -109,6 +111,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             resets: 0,
+            dwg: None,
         }
     }
 
@@ -178,6 +181,10 @@ impl Session {
                 // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
                 self.model_mut().resolve();
                 self.model_mut().sync_library();
+                // Locked and equal dimensions moved what they measure to as the command moved it.
+                if cmd.undoable {
+                    crate::constraints::keep(self, &before)?;
+                }
                 // What was made or changed must be as a sketch of it solves too (an outline that is simple), which a file
                 // from before may break; Insert from File brings in what it finds.
                 // (Before the check, which would name a bow tie of no area by that, not by what to redraw.)

@@ -45,7 +45,7 @@ would: a compound element's layer lines, an opening's jambs and glass, a stair's
 holds only the categories set apart from `styles::default_of` (which draws as before: cut pen 10, seen pen 4). What's next on this
 foundation: annotation categories' object styles and subcategories, viewports as windows onto their views, and printing.
 
-Detail lines and their line styles (`lines.rs`): a `LinePattern` is a dash or a dot then a space, again and again, each length mm
+Detail lines and their line styles (`lines.rs`): a `LinePattern` is a freely ordered sequence of 1–32 graphic segments, each length mm
 on paper, so it reads the same at any scale (`Solid` is none, a name no pattern takes); a `LineStyle` is a pen, a colour and a
 pattern; both are library entries (`Kind::LinePattern`, `Kind::LineStyle`), so a style names its pattern and a detail line its style
 by GUID in a file, and a rename (`rename_entry`) follows everywhere. A project starts with ours, named in its language
@@ -56,7 +56,20 @@ pattern's dashes in pixels at the view's paper (`LinePattern::dash`); a repeat u
 any list of on and off lengths (`Prim::Line::dash`), which SVG, PDF, the PNG and the canvas all take. The desktop has Annotate >
 Detail Line (DL; a line a click, as walls are, chained until Enter or the first point again; the Options Bar's Line Style and
 Chain; the Draw panel's other shapes, below) and Manage > Line Styles (`linestyles.rs`: styles and patterns on two tabs of one
-draft, applied as one undo step). Next: patterns made from lines drawn in a view.
+draft, applied as one undo step). Patterns > New Pattern or Edit opens the separate Line Pattern Creator
+(`linestyles/creator.rs`), with a live straight/curved preview and segment controls, add, reorder and delete. Save Pattern
+updates the library draft; Cancel Pattern discards just the creator, and the parent Cancel discards the whole draft.
+Segments are Gap (`space`), Straight (`dash`), Dot (`dot_length`, its reserved length, with a circle exactly the pen width),
+Offset (`length`, `count` 2–9, `distance` between adjacent lines symmetrically about the centerline), Wave and Zig Zag
+(`length`, `frequency` in cycles per segment, `amplitude` from centerline), and Text (`length`, `size`, `text`). Text uses
+bundled IBM Plex Sans on Linux, Windows and macOS, with the annotation font fallback for missing characters. Its size is
+maximum capital height; it scales uniformly down when its reserved length is shorter than the text. Text is centered on
+the axis and each glyph rotates with its own curve tangent. `lines/pattern.rs` makes shared stroke/fill geometry for
+preview, canvas, PNG, SVG and PDF; old alternating dash/space/dot patterns retain native dashes. On canvas and paper,
+pattern lettering uses the same non-zero contour tessellation as notes, keeping counters transparent during selection
+and hover as well as ordinary drawing; dots retain their pen-sized polygon rendering. Tiny or excessively dense
+patterns draw solid with bounded work. Region profiles, snapping, alignment and dimensions use the original centerline.
+Format 9 adds these segments; older dash/space/dot patterns open unchanged. Next: patterns made from lines drawn in a view.
 
 A detail line and a sketch line are any `curves::Curve`: a polyline (straight segments and arcs, each arc's turn in degrees
 counter-clockwise as a wall's; a line or an arc is one of two points), a circle, an ellipse whole or partial, a spline by its
@@ -121,6 +134,37 @@ at most `MAX_LINEWORK` (2,000) edges, ends within `MAX_COORD`, and a line style 
 lines along all its edges in one pass (`render::linework`: the cost is the prims plus the edges, not a pass over every prim for
 each edge). A line style a view's linework uses can't be deleted, and an element's entries go with it.
 
+Text notes and text types (`text.rs`). A `Note` is drawn in one view, as a detail line is, and is of a text type
+(`Model::text_types`, library entries of `Kind::TextType`, so a file names a note's type by GUID and `rename_entry` follows a
+rename): Revit's font, size (its capitals' height on paper, mm), bold, italic, underline, width factor, colour, and a border
+`border_offset` mm on paper round its text in pen `border_pen`, from whose side nearer its end a leader starts. A project starts
+with 2.5mm, 3.5mm and 5mm in Arial; `text_type` makes, renames and deletes them (none in use). A type's font is a name:
+any font the system has, or one we carry (IBM Plex Sans, IBM Plex Mono, BIMCraft Lettering: `font.rs`'s single-stroke
+capitals). `text/system.rs` lists the system's fonts once (`system::index`): it looks through the folders Linux, Windows
+and macOS keep them in and reads each file only as far as its OpenType table directory and its `name`, `OS/2` and `head`
+tables (family, weight, italic, whether it varies its weight), from the public specification, every offset checked; a face
+is read whole (`system::load`, kept, up to `MAX_FONT`) only when a note is lettered in it. `text::resolve` turns a type's font
+and a character's bold and italic into a `Face`: ours by name; else the family; else its stand-ins (`system::substitutes`:
+Arial by Liberation Sans, Arimo, Helvetica, Nimbus Sans, DejaVu Sans…, Times New Roman and Courier New likewise); else Plex
+Sans. So Arial, the default, letters on any system, and a file naming a font this one hasn't opens (`TextType::check`
+takes any name) and draws with what stands in; the `text_type` command refuses a font the system can't letter, unless the
+type has it already. A family's own bold and italic faces are taken where it has them; else a variable face is set to
+`wght` 700, any other is made bold by its outline drawn round heavier (our lettering by heavier strokes), and italic by
+slanting it. A character a face hasn't is lettered from Plex Sans, then Plex Mono, then the system's wide fonts
+(`system::FALLBACKS`: Noto Sans CJK, Microsoft YaHei, PingFang…), else drawn as the lettering's question mark.
+`text::shape` reads a glyph's outline with `ttf-parser` once and keeps it. `text_type` without a name lists the fonts
+(`text::families`) and what letters each type here (`drawn_with`); Type Properties shows "drawn with" when that differs. A note may override bold, italic and underline on parts of itself: `override_format`
+lets its `runs` (character ranges, a line break one character) count, each setting any of the three either way, so a part
+stays bold, or not, whatever type the note gets. `modify` with new `text` alone keeps the runs on what didn't change
+(`text::remap`: the common start and end keep theirs, what came in takes the format before it). `text::layout` lays a note out
+in mm on paper (lines `LINE_PITCH` sizes apart, each character's place and width), which `render::note` draws (each letter a
+`Prim::Fill` of rings filled by the non-zero rule, our lettering and Plex Mono's bold as lines, underlines as lines; `Part::Text`)
+and which the desktop's editor reads for its caret, its selection and a click's place (`Layout::caret`, `boxes`, `index_at`;
+`Drawing::note_frame` turns layout mm into the drawing's pixels and back). The canvas fills a letter, holes and all, from
+`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again.
+A file of format 7 has notes with a `size`: reading it gives each a type of that size (`Model::typed_notes`), and `Model::check`
+refuses a `size` left on one. A note holds up to `MAX_NOTE` (4,000) characters and `MAX_RUNS` (1,000) runs.
+
 Detail groups (`groups.rs`) are Revit's: `create_group` (GP) makes the detail lines, filled regions and text notes given,
 all of one view, into a group type (`Model::detail_groups`) holding them as `Member`s about the middle of them, in no
 view, and puts one `DetailGroup` element in their place. Members are parts (`HasPart`, `parts_now`): each has its own id
@@ -177,7 +221,8 @@ new drawing of what a view cuts sets `Part::Cut`; a hidden door's opening is dra
 `Model::view_range_of`, a phase with its phase filter, design options, scale, detail level, visual style), and they can't change those
 (`graphics`, `scale`, `detail`, `visual_style` and `modify` refuse). Snaps, Tag All, the desktop's Select All
 Instances and the framing of sections and 3D views take what `Look` shows too. A level's ceiling plan is its plan's view;
-transparency shows in 3D only.
+transparency shows in 3D only. A surface is seen through as much as the greater of its material's `transparency` (`Tri::alpha`, in
+plain views too) and the view's override for its element (not in a plain view); both painters take it from `Tri::alpha`.
 
 A 3D view may be cut to a section box (fork issue 1), as Revit's Section Box: `View3D::section_box`, a `SectionBox` of six planes
 square to the axes from `min` to `max`, `on` or off (off, it keeps its extents), set by the `section_box` command (which makes the
@@ -207,11 +252,35 @@ cuts and regions draw the layers with the same bounded pattern renderer as fille
 target sets its scale. Pattern references follow library renames, save as GUIDs, and prevent deletion while used by a view or
 template. The 3D renderer continues to use the solid `fill` colour for shading; it does not draw hatch patterns.
 
+A 3D view may be seen in perspective, as through a camera, rather than parallel (axonometric): `View3D::perspective`, a `Perspective`
+with the `lens` it is seen through (its focal length, mm on a 35 mm camera, whose 36 mm of film, `FILM`, is the picture's width; 10 to
+600 mm, checked in `Model::check`) and `on` or off (off, it keeps its lens), set by the `perspective` command, which makes the default 3D
+view as `section_box` does; `View3D::lens` is the lens while it's on. The camera is `view3d::Camera` with `lens` set: the eye stands back from
+the target along the view as far as makes `scale` true at the target (`Camera::eye_distance`, the focal length in px over the scale), so
+orbit turns it about the target, pan carries both, zoom walks it in (a point on the plane through the target staying under the cursor),
+`Camera::sized` keeps the eye where it stood as the picture or the lens changes, and `with_eye_elevation` raises or lowers it looking at the
+same target from as far across the plan. `fit_from` fits a perspective with the eye as far back as puts a ball round what is shown inside
+the picture's narrower side. `Camera::project` keeps "larger is nearer": in perspective `d² / a - d` for a point `a` mm in front of an eye
+`d` from the target, as near as a parallel view's at the target and straight across the picture of a plane (it goes as `1 / a`), so the
+rasterizer's barycentric depths stay exact, and `point_at` turns a pixel and its depth back into the model point (textures, the section
+box's `Boxed`). What is less than `NEAR` (10 mm) in front of the eye is cut away: a triangle into the one or two its near part makes
+(`Projector::in_front`, as weights of its corners, so a curve's lighting carries over), a line to its near part (`Camera::in_front`: edges in
+wireframe, levels' marks, the section box's frame); a point behind the eye projects to no number. A face is lit on the side the eye is on
+(`Camera::toward`), as the card's `front_facing` is, and how far a line may lie behind a surface and show is a pixel's worth where the
+line is (`Camera::slack`). `Camera::along` takes, in perspective, the point on the axis nearest the line from the eye through the pointer,
+so a dragged section box face stays under it. `render` of the 3D view goes through its lens, and `eye_elevation` puts the eye that high. A
+sheet's 3D viewport stays parallel (its scale is paper's). The card draws perspective too: `View::perspective` gives the shader the
+focal length, how far the eye is and a depth of `a + b / ahead`, 1 at `NEAR` and 0 past the far side of the mesh (a reversed depth, as
+precise far off as near), with the same `NEAR` cut by the card's clipping; `Mesh::pick` cuts and projects as the processor does.
+`picking_the_mesh_in_perspective_finds_what_the_cpu_picture_shows_from_afar_and_from_within` and
+`the_card_draws_in_perspective_what_the_processor_does_from_afar_and_from_among_the_walls` compare them, from outside and with the eye
+inside the house (`view3d::inside`).
+
 The 3D view can be drawn on the graphics card (File > Settings > Performance; off until asked for: `BimApp::card`, `settings.json`'s
 `gpu_3d`). `view3d::gpu::Mesh` is the triangles a view shows as f32 vertices relative to the middle of what is drawn (millimetres far
 from the origin would overflow f32), each with its colour, normal, face normal, plane, element and texture; the textures' mip levels as
 words (`Skin`; `Mesh::lookups` gives the level a zoom looks up, as `Sampler::level_for` does); and a bounding volume hierarchy built on
-the first pick. Surfaces seen through come after the opaque ones (`Mesh::clear_from`), each element's transparency in its `Owner`.
+the first pick. Surfaces seen through come after the opaque ones (`Mesh::clear_from`), each element's transparency in its `Owner` (an element whose layers differ in transparency has an `Owner` for each).
 `Mesh::new` refuses, with a reason, what the card doesn't draw (hidden line, wireframe, more than `MAX_TRIS`), and the processor draws those as before, and sections and sheets always. `Mesh::pick` is `Image::pick` without a picture: the
 same projection and barycentric test for triangles (the nearest seen through where it is nearer than the nearest opaque one), and for levels the same `LevelMarks` that `Scene::picture` draws (`level_marks`: one
 definition of a level's lines and head). The desktop's `gpu.rs` and `gpu.wgsl` draw it in passes into a texture egui shows like the
@@ -350,3 +419,40 @@ them without knowing: `Look::with` makes a linked id halftone, and picking never
 `in_box`, `shows` and `Mesh::pick` leave them out). The commands that make an image (`render`, `save` to svg, png or pdf) draw `seen`; the desktop's
 `view_model` does, cached by the project's `Arc`. The schedules, `Model::check`, IFC and every command that edits work on the project itself.
 To do: shared coordinates, a link's graphics overrides and visibility per view, hosting on a linked wall, unloading.
+
+## Dimensions
+
+A dimension (`Dimension`, the `dimension` command) measures the model as it is, so it follows what it measures. Its `refs` are lines
+(`Reference {id, face}`: a wall's centre line, faces and ends, a door's or window's centre and jambs, a grid, a straight detail line) or, with
+`point: start|end`, the point at that end of one (`Model::reference_point`: a wall's centre line ends where its location line does, a face where
+the outline turns off it, so at the mitred corner; a detail line of any shape at its ends; `reference_points` lists them, `endpoint_at` finds the
+nearest, `{endpoint: [x, y]}` in a command). `reference_geometry` gives either as a line, a point as a line of no length, and `crossings` lays
+them along the way the dimension measures (`measured_along`): a linear one's `orient` (horizontal or vertical), else square to its first line,
+else from its first point to the next elsewhere. `Model::check` refuses a line not parallel to the first, or not square to a linear one's line,
+and points all in one place. Mirror keeps the end of a line along the element and flips the one across it (`Reference::mirrored`); Flip swaps
+both. A linear one given no `orient` runs vertical where `at` is east or west of everything it measures, else horizontal; the desktop's Auto
+(`dims::Placing::kind`) also lays an aligned one where the cursor is among the points (`Orient::follow`), as Archicad does. Radial and diameter
+dimensions measure round columns, curved walls (centre line or a face) and circles and arcs (`reference_arc`); arc length, a curved wall's or an
+arc's length along it (`reference_sweep`), all of it or, with two point references after the arc, between them (`Model::arc_span`), its line an arc through `at` round the same centre. `dims::round_at` picks the face nearest a click.
+
+Each dimension has a dimension type (`dims.rs`, `Model::dimension_types`, a library entry `Kind::DimensionType`, the `dimension_type` command),
+Revit's type parameters with lengths in mm on paper: Dimension String Type (continuous, baseline, ordinate), tick mark (diagonal, arrow, open
+arrow, dot, none) and its size, line and tick pens, colour, dimension line extension, Witness Line Control (gap to element, or fixed to the
+dimension line with its length), witness line gap and extension, baseline spacing, centre marks, and its text: font (as text types take one,
+`DimensionType::lettering`), size, bold, italic, underline, width factor, offset, opaque or transparent background, Read Convention, units and
+rounding (`DimensionType::length`), and the radius and diameter symbols and the equality text. A project starts with `Diagonal - 2.5mm Arial`,
+which aligned, linear, angular and arc length dimensions start in, and `Arrow - 2.5mm Arial`, which radial and diameter ones do
+(`dims::default_type`); a file of format 9 gives its dimensions their kind's (`Model::typed_dimensions`). A dimension's own text, Revit's
+instance values, is a prefix, a suffix, text above and below, Replace With Text and Equality Display, and a segment may have its own over it
+(`texts`, `SegmentText`, the `dimension_text` command; `Dimension::text` reads one through the other, `dimension_segment_at` finds a segment by a
+point); `Model::dimension_labels` is what its
+numbers read (and `elements` shows as `labels`): a baseline string's each from its first reference, an ordinate's each witness line's, the first 0.
+An aligned or linear dimension may be kept equal (`equal`, Revit's EQ, which also turns its Equality Display on) and have segments
+locked at a length (`locked`, `Lock`; the `dimension_constraint` command). `constraints::keep` runs in `Session::execute` after every undoable
+command, before the check: each constrained dimension is solved on its own line (its `stations`, each with its reference), a locked segment tying
+two stations rigidly and equality tying all its segments to one length (a locked one's, else its ends', which stay where they are, so an inner
+reference dragged goes back); a run of tied stations stays where what the command moved puts it, else where its first is. What has to move is
+moved by `commands::move_by`, as `move` moves it, and the dimensions are solved again (`PASSES`) until all hold; where they can't (locked
+lengths that differ made equal, one element pulled two ways), the command is refused, saying which dimension, and nothing changes.
+`render/dimensions.rs` draws them all as the type says (`Ink`: its lines, ticks and witness lines, and its numbers laid out by `crate::text`
+over the paper where the background is opaque).

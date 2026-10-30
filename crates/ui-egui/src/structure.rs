@@ -10,6 +10,7 @@ use bimcraft_core::{runs_of, stood_of};
 use egui::{ComboBox, TextEdit, Ui};
 use serde_json::{Value, json};
 
+use crate::DimMode;
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::{BimApp, Status, Tool, big_button, panel, top_params};
@@ -52,6 +53,9 @@ pub(crate) fn hint(tool: &Tool) -> Option<&'static str> {
 pub(crate) fn same_tool(a: &Tool, b: &Tool) -> bool {
     match (a, b) {
         (Tool::Run(x, _), Tool::Run(y, _)) | (Tool::Stand(x), Tool::Stand(y)) | (Tool::Fixture(x), Tool::Fixture(y)) => x == y,
+        // Aligned is its own tool; Linear lays the others.
+        (Tool::Dimension(x, _), Tool::Dimension(y, _)) => (*x == DimMode::Aligned) == (*y == DimMode::Aligned),
+        (Tool::Round(x, _), Tool::Round(y, _)) => x == y,
         _ => std::mem::discriminant(a) == std::mem::discriminant(b),
     }
 }
@@ -92,6 +96,12 @@ impl BimApp {
             let tip = msg!("Floor: Structural (SB): click inside the walls to floor them with a slab that carries load");
             if big_button(ui, Icon::Floor, "Floor: Structural", self.tool == Tool::Floor && self.floor_structural, tip).clicked() {
                 self.structural_floor();
+            }
+        });
+        panel(ui, msg!("Reinforcement"), |ui| {
+            let tip = msg!("Reinforce (RF): bars by rules for the selected beam, column, footing or floor");
+            if big_button(ui, Icon::Rebar, "Reinforce", self.reinforce_dialog.is_some(), tip).clicked() {
+                self.open_reinforce();
             }
         });
         panel(ui, msg!("Foundation"), |ui| {

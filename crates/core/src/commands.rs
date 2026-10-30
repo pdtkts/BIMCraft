@@ -22,15 +22,16 @@ use crate::library::Kind as LibKind;
 use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
 use crate::model::{
-    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion,
-    Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS, MAX_SLOPE, MAX_TEXT,
-    Mass, Model, NOTE_SIZE, Note, Opening, OpeningType, PARAMETER_CATEGORIES, ParameterKind, Pattern, PlanView, PointCloud,
-    ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Reference, Roof, RoofType, Room, RoomSeparator,
-    STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D, Viewport, Wall, WallType,
-    heading, paper,
+    CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, End,
+    Extrusion, Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD, MAX_POINTS,
+    MAX_SLOPE, MAX_TEXT, Mass, Model, Note, Opening, OpeningType, Orient, PARAMETER_CATEGORIES, ParameterKind, Pattern, Perspective,
+    PlanView, PointCloud, ProjectParameter, RAMP_SLOPE, RAMP_WIDTH, RISER, Railing, RailingType, Ramp, Rebar, Reference, Roof, RoofType,
+    Room, RoomArea, RoomSeparator, STAIR_WIDTH, Schedule, Section, SectionBox, Shaft, Sheet, Side, Spot, Stair, TOL, TREAD, Tag, View3D,
+    Viewport, Wall, WallType, heading, paper,
 };
 use crate::paint;
 use crate::phasing;
+use crate::rebar;
 use crate::render::Drawing;
 use crate::sketch::{self, SketchLine};
 use crate::texture::{self, Kind, Picture, Texture};
@@ -53,8 +54,8 @@ pub static ALL: &[Command] = &[
     other(
         "new",
         "New",
-        "{name?, language?: en|pt|es|vi} an empty project with Level 1 (0) and Level 2 (3000), named in its language (Nível 1, \
-         Nível 2 in Portuguese; Nivel 1, Nivel 2 in Spanish; Cao độ 1, Cao độ 2 in Vietnamese)",
+        "{name?, language?: en|pt|es|sv|cs|fr|vi} an empty project with Level 1 (0) and Level 2 (3000), named in its language (Nível 1, \
+         Nível 2 in Portuguese; Nivel 1, Nivel 2 in Spanish; Nivå 1, Nivå 2 in Swedish; Cao độ 1, Cao độ 2 in Vietnamese)",
         new,
     ),
     other("open", "Open", "{path} a .bimcraft project", open),
@@ -140,14 +141,14 @@ pub static ALL: &[Command] = &[
         "Import CAD",
         &[],
         "{path | cad, name?, level?, view?, at?: [x, y], position?, units?, scale?, angle?, layers?, colors?, link?} brings in a \
-         DXF drawing (`path`: an ASCII DXF of any version; save a DWG as DXF first) or places one the project holds again (`cad`, \
+         DXF drawing (`path`: an ASCII DXF of any version, or a DWG, which the desktop and the command line read as DXF) or places one the project holds again (`cad`, \
          its name), as an element in every plan of `level`, or with `view` (a plan) in that view only. `units` of the drawing: \
          auto (the default: what its file says, else mm), mm, cm, m, in or ft; or `scale`, mm to each of its units. `position`: \
          center (the default: the middle of the drawing on `at`, the origin unless given) or origin (its origin on `at`); \
          `angle` turns it about `at`, degrees. `layers`: visible (the default: those its file has on and thawed), all, or a list \
          of those to show. `colors`: preserve (the default), invert or black. `link: true` remembers the file, so `reload_cad` \
          and opening the project read it again. Returns its id, the drawing's name, its unit, entities and layers, its extents \
-         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out",
+         in the model, how many entities lie far from the rest (they're left out of its extents) and what was left out, with `notes` on what a DWG's read left out",
         import_cad,
     ),
     edit(
@@ -351,6 +352,52 @@ pub static ALL: &[Command] = &[
         room_separator,
     ),
     edit(
+        "rebar",
+        "Rebar",
+        &[],
+        "{points: [[x,y,z],…], diameter, host?, grade?, layer?, closed?, count?, step?, level?} a reinforcing bar bent along `points` \
+         (mm; z over the level), `diameter` mm thick (3 to 100), of steel `grade` (CA-50 unless told). `host` is the beam, \
+         column, footing or floor it reinforces (the level is then its level) and it goes with; `closed` joins the last point \
+         to the first, a hoop. With `count` bars (up to 1000), each is `step` [dx,dy,dz] from the last: a layer of bars, or \
+         hoops along a beam. Returns their ids. Its schedule lists \
+         Grade, Diameter, Length and Weight (kg, of steel at 7850 kg/m³), and a grouped one is a bar schedule",
+        rebar_bars,
+    ),
+    edit(
+        "reinforce",
+        "Reinforce",
+        &[],
+        "{host | hosts: [id, …], preset?, cover?, grade?, grade_stirrup?, clearance?, …} bars by rules for a beam, a column, a footing or a floor: the engineer \
+         says how many, how thick and how far apart (no standard's table is in it) and it lays them inside the cover and checks \
+         that they fit, saying what to change. All: `cover` (mm: one number, or {top, bottom, sides}, top and bottom the faces of a \
+         beam, a footing or a floor and the ends of a column; else the host's Cobrimento or ConcreteCover parameter), `grade` \
+         (CA-50), `grade_stirrup` (the stirrups' and ties'), `clearance` (least mm between bars; their thickness, at least 20, \
+         unless told). A spacing is the most between bars: they are spread evenly, so the last is where the first is from the \
+         other end. Beam: `bottom` and `top` {count, diameter, hook?} (`hook`, the straight leg in mm turned up from the bottom bars and down from the top ones at both ends, or {start, end}); `stirrup` {diameter, spacing, ends?: {length, spacing}, hook?} \
+         (`ends` closer in the first and last `length` mm; `hook` a tail in mm at the ends); `skin` {diameter, spacing} up each \
+         side between the rows; `anchor` {start?, end?} mm the bars run past the ends (0 flush, none a cover short). Column: \
+         `bars` {diameter, x?, y?, hook?} (`hook`, a leg turned into the section at the foot and the top, or {below, above}; bars along each face across its width and across its depth, corners counted, \
+         2 each; a round column takes `count` instead of x and y, evenly round its circle, with hoops of 24 sides), `stirrup`, `ties` {diameter, hook?} \
+         across a rectangular section between bars that are not at a corner (`hook`, a tail in mm at each end), `anchor` {below?, above?}. \
+         Footing: `mesh` {x?, y?: {diameter, spacing}, hook?} (hook turns the ends up; a round footing's bars stop at its circle). Floor: `bottom` and \
+         `top` {x?, y?: {diameter, spacing}, hook?} (bars along east and north; `hook`, a leg turned up from a bottom mesh and down from a top one), \
+         stopping a cover short of its outline and its openings; a sloped floor's bars follow its top, the cover square to it. \
+         The bars are `rebar` elements of the host, each on a `layer`; reinforcing again replaces the ones it made and leaves \
+         any drawn by hand. `preset` names a `reinforcement_preset` of the host's kind, whose parameters stand for the ones not given here. `hosts` arms each of a list alike (up to 1000, and 20000 bars in all); if one refuses, none is armed, \
+         and the refusal names it. Returns ids, count, hosts, removed and weight_kg",
+        reinforce_host,
+    ),
+    edit(
+        "reinforcement_preset",
+        "Reinforcement Presets",
+        &[],
+        "{name?, kind?: beam|column|footing|floor, params?, rename?, delete?: true} a named set of the parameters `reinforce` takes for \
+         one kind of host (`params`: its `cover`, `grade`, `grade_stirrup`, `clearance` and what its kind takes, and not `host`), kept in \
+         the project; `reinforce` with `preset` takes it and lets what is given with it replace its own. Without `name`, lists them. \
+         It is not checked against any host until it arms one",
+        reinforcement_preset,
+    ),
+    edit(
         "column",
         ui_msg!("Column"),
         &["CL"],
@@ -518,23 +565,92 @@ pub static ALL: &[Command] = &[
         "dimension",
         ui_msg!("Aligned Dimension"),
         &["DI"],
-        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|angular|radial} aligned (the default): the distances between \
-         parallel references, along a line through `at`; angular: the angle between two references that meet, on the side \
-         of `at`; radial: a round column's radius, toward `at`. A ref is {id, face?}: a wall's centre (the default), left or \
-         right face (of its start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's \
-         start or end; a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). Or a \
-         point [x, y] on one of those (for radial, on a round column's edge). It follows what it measures",
+        "{refs: [ref, …], at: [x, y], level?, kind?: aligned|linear|angular|radial|diameter|arc_length, orient?: \
+         horizontal|vertical} aligned (the default): the distances between parallel references, along a line through `at` \
+         (between points, along the first two; points and lines, square to the lines); linear: the same with its line \
+         horizontal or vertical as `orient` says, or without one as `at` lies: east or west of the points, vertical, else \
+         horizontal (its lines must run square to it); angular: the angle between two references that meet, on the side \
+         of `at`; radial: a round column's, curved wall's, circle's or arc's radius, toward `at`; diameter: the same \
+         across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it \
+         (all of it, or with two point refs after it, between them), its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
+         start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
+         a grid's line; a straight detail line, or its start or end (radial: a circle or an arc of one). With `point: \
+         start|end`, {id, face?, point} is the point at that end of the line: a wall's centre line's end, a face's \
+         corner, a grid's, a detail line's (of any shape) or a jamb's end. Or a point [x, y] on one of those lines (for \
+         radial and diameter, on a round edge; for arc_length, on the arc), or {endpoint: [x, y]}, the end of one nearest \
+         it, within 100 mm. It follows what it measures",
         dimension,
     ),
     edit(
         "text",
         ui_msg!("Text"),
         &["TX"],
-        "{text, at: [x, y], view?, size?, angle?, leader?: [x, y]} a text note, its first line's top left at `at`, in a view \
-         by name or id: a level's plan (the lowest by default; `at` in plan mm), a section or an elevation (`at` along its \
-         line from its start, and up), or a sheet by number (`at` in paper mm). `size` is its capitals' height on paper, \
-         mm (2.5); `angle` degrees counter-clockwise; with `leader`, a line to that point. Lines break at \\n",
+        "{text, at: [x, y], view?, type?, angle?, leader?: [x, y], override_format?, runs?: [{from, to, bold?, italic?, \
+         underline?}, …]} a text note, its first line's top left at `at`, in a view by name or id: a level's plan (the lowest \
+         by default; `at` in plan mm), a section or an elevation (`at` along its line from its start, and up), or a sheet by \
+         number (`at` in paper mm). Lettered as its text `type` says (2.5mm unless told; `text_type` lists and makes them: \
+         its font, its size, its border), turned `angle` degrees counter-clockwise; with `leader`, a line to that point. \
+         Lines break at \\n. With `override_format`, each run makes characters `from` up to `to` (counted in characters, a \
+         line break one) bold, italic or underlined (true), or not (false), whatever the type says; they stay when the \
+         type changes, and `modify` with a new `text` alone keeps them on what didn't change. Font and size are the type's",
         text_note,
+    ),
+    edit(
+        "text_type",
+        "Text Types",
+        &[],
+        "{name?, font?, size?, bold?, italic?, underline?, width_factor?, color?, border?, border_offset?, border_pen?, \
+         like?, rename?, delete?: true} a text type of the project's: its `font`, any the system has, or one BIMCraft carries \
+         (IBM Plex Sans, IBM Plex Mono, BIMCraft Lettering: single-stroke capitals); Arial, the default, letters on any system \
+         (where it isn't installed, Liberation Sans, Arimo, Helvetica or the like stands in, else IBM Plex Sans), and a font a \
+         file names that this system hasn't is stood in for likewise. Its capitals' height on paper (`size`, mm, 2.5 for a new \
+         one), bold, italic and underlined or not (a family's own bold and italic faces where it has them), `width_factor` (1: \
+         as the font draws it), its colour (\"#rrggbb\" or [r, g, b], black unless told), and whether a border is drawn round \
+         its notes, `border_offset` mm on paper out from their text (where a leader starts too; 1), in pen `border_pen` (0 to \
+         16; 1). A new one starts as `like` says, or as 2.5mm Arial. A project starts with 2.5mm, 3.5mm and 5mm. `rename` \
+         renames it, its notes following; `delete` takes it away while no note is of it. Without `name`, it lists every type, \
+         the fonts this system has, and the font that letters each type here (`drawn_with`)",
+        text_type,
+    ),
+    edit(
+        "dimension_constraint",
+        "Dimension Constraints",
+        &[],
+        "{id, equal?: bool, locked?: [segment, …]} an aligned or linear dimension's constraints, as Revit's EQ and padlocks: \
+         `equal` keeps its segments equal (what it measures to between its first and last moves to keep them so, its ends \
+         staying); `locked` lists the segments (counted from 0, west to east or south to north) kept at the lengths they \
+         have now. After any command, what a constrained dimension measures to moves with what the command moved, or the \
+         command is refused, saying which dimension can't be kept",
+        dimension_constraint,
+    ),
+    edit(
+        "dimension_text",
+        "Dimension Text",
+        &[],
+        "{id, segment?, prefix?, suffix?, above?, below?, replace?} a dimension's text, as Revit's Dimension Text: what goes \
+         before and after its numbers, over and under them, or in place of them. With `segment` (its numbers counted from 0, \
+         west to east or south to north, as `labels` lists them), that one's own, over the dimension's where it says \
+         something; an empty text clears it, and a segment with none left goes back to the dimension's",
+        dimension_text,
+    ),
+    edit(
+        "dimension_type",
+        "Dimension Types",
+        &[],
+        "{name?, like?, rename?, delete?: true, …values} a dimension type of the project's, as Revit's type parameters, \
+         lengths mm on paper. Graphics: `string` continuous|baseline|ordinate (Dimension String Type; baseline lines \
+         `baseline_spacing` apart, 7), `tick` diagonal|arrow|open_arrow|dot|none, `tick_size` (2), `line_pen` and `tick_pen` \
+         (0 to 16; 4 and 7), `color` (\"#rrggbb\" or [r, g, b]), `line_extension` past the outer witness lines (0.8), `witness` \
+         gap_to_element|fixed (Witness Line Control), `witness_length` when fixed (5), `witness_gap` off what it measures \
+         (0.6), `witness_extension` past the dimension line (0.8), `centre_mark` on radial and diameter ones. Text: `font` (as \
+         text types take; Arial), `text_size` (2.5), `bold`, `italic`, `underline`, `width_factor` (1), `text_offset` off \
+         the line (1), `background` opaque|transparent, `read` up_then_left|up_then_right (Read Convention), `units` (mm, cm, \
+         m, in, ft, ft-in; null for the project's) and `decimals` (0 to 6; null as the units show), `radius_symbol` (R), \
+         `diameter_symbol` (Ø), `equality_text` (EQ). A new one starts as `like` says, else as the default. A project starts \
+         with `Diagonal - 2.5mm Arial` (aligned, linear, angular and arc length dimensions start in it) and `Arrow - 2.5mm \
+         Arial` (radial and diameter ones). `rename` renames it, its dimensions following; `delete` takes it away while no \
+         dimension is of it. Without `name`, it lists every type",
+        dimension_type,
     ),
     edit(
         "spot",
@@ -651,7 +767,7 @@ pub static ALL: &[Command] = &[
         "Edit Type",
         &[],
         "{category: wall|floor|ceiling|door|window|column|structuralcolumn|footing|roof|railing|beam|stripfooting|pipe|conduit|\
-         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill? | width?, depth?, round?, \
+         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation? | width?, depth?, round?, \
          material? | height?, spacing?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
          made of a `material` of the library. A wall type may have `layers` [{function?: structure|\
@@ -666,9 +782,10 @@ pub static ALL: &[Command] = &[
         "material",
         "Materials",
         &[],
-        "{name, color?: \"#rrggbb\" | [r, g, b], cut?, surface?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
+        "{name, color?: \"#rrggbb\" | [r, g, b], transparency?: 0-100, cut?, surface?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
          image?} | null, rename?, delete?: true} a material of the project's library, created or changed: its colour in shaded 3D \
-         views, the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
+         views, its `transparency` there (percent of what lies behind it that shows through, 0 opaque; the starter Glass has 70), \
+         the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
          surfaces show at its size in the building (a floor's top in plan, a ceiling's underside in its ceiling plan). Patterns: \
          none, solid, diagonal, crosshatch, horizontal, vertical, grid, brick, concrete, insulation, or the name of one of the \
          project's fill patterns (see `fill_pattern`), kept while the material shows it and renamed with it. Its `texture` is what its \
@@ -719,7 +836,8 @@ pub static ALL: &[Command] = &[
         "{name, category?: furniture|casework|plumbing|lighting|generic|door|window, parameters?: [{name, kind?: length|number|\
          angle|yesno|material, instance?, value?, formula?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
          profile?: [[a, b], …], circle?: {centre: [a, b], radius}, axis?: [[a, b], [a, b]], from?, to, material?, visible?, \
-         void?}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to}, visible?}], rename?, delete?: \
+         void?}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to}, visible?}], operation?: swing|\
+         double-swing|sliding|double-sliding|folding|fixed (a door's or window's, for IFC and schedules), rename?, delete?: \
          true, path?, save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, or loaded from the .json file at `path` (a family \
          as `inspect` shows it, with its `name`). Its forms are profiles drawn in its own axes (x along a component's angle, y \
@@ -776,6 +894,15 @@ pub static ALL: &[Command] = &[
         "{from: id, ids: [id,…]} gives the elements in `ids` the type of `from` (and, for components, its family), as Revit's Match \
          Properties does; only elements of `from`'s category take it, the rest come back in `skipped`. Returns {modified, skipped}",
         match_properties,
+    ),
+    edit(
+        "align",
+        ui_msg!("Align"),
+        &["AL"],
+        "{id, reference: [[x,y],[x,y]], line: [[x,y],[x,y]]} aligns an element's picked line with a reference in plan: \
+         turns by the smaller angle about the picked line's midpoint, then moves it onto the reference, keeping its size. \
+         Doors and windows slide along their host wall; they cannot turn independently. Returns {aligned, angle, by}",
+        align_element,
     ),
     edit(
         "move",
@@ -900,9 +1027,11 @@ pub static ALL: &[Command] = &[
         "line_pattern",
         "Line Patterns",
         &[],
-        "{name?, segments?: [{dash: mm} | {space: mm} | \"dot\", …], rename?, delete?: true} a line pattern of the project's: \
-         a dash or a dot then a space, again and again, each dash and space 0.05 to 100 mm long on paper, so it reads the \
-         same at any scale. A project starts with Dash, Long Dash, Dot, Dash Dot, Hidden and Centre; Solid is a line with \
+        "{name?, segments?: [{dash: mm} | {space: mm} | \"dot\" | {dot_length: mm} | {offset: {length, count, distance}} | {wave: {length, frequency, amplitude}} | {zigzag: {length, frequency, amplitude}} | {text: {length, size, text}}, …], rename?, delete?: true} a line pattern of the project's: \
+         1–32 freely ordered graphic segments, each 0.05–100 mm long on paper, so it reads the \
+         same at any scale. Offsets have 2–9 lines spaced symmetrically; frequency is cycles per segment, 0.1–100; \
+         amplitude and spacing are mm. Text uses bundled IBM Plex Sans, size is maximum capital height (shrinks to fit length), \
+         1–256 single-line characters, following the curve. All graphics preserve the centerline. A project starts with Dash, Long Dash, Dot, Dash Dot, Hidden and Centre; Solid is a line with \
          none. `rename` renames it, the line styles using it following; `delete` takes it away, while no style uses it. \
          Without `name`, it lists every pattern",
         line_pattern,
@@ -1063,6 +1192,16 @@ pub static ALL: &[Command] = &[
         delete_type,
     ),
     edit(
+        "rename_type",
+        "Rename Type",
+        &[],
+        "{category?: wall|floor|door|window|column|roof|ceiling|railing|…, family?, type, name} renames a type of a category \
+         (`category` and `type`) or one of a family's types (`family` and `type`) to `name`, as Rename in Type Properties does: \
+         the elements of it, and what else names it, follow, and it keeps its GUID; refused for a name another type of it has. \
+         Text types and filled region types rename with `rename` on `text_type` and `filled_region_type`",
+        rename_type,
+    ),
+    edit(
         "purge",
         "Purge Unused",
         &["PU"],
@@ -1108,22 +1247,44 @@ pub static ALL: &[Command] = &[
         units,
     ),
     edit(
+        "room_area",
+        "Area and Volume Computations",
+        &[],
+        "{at?: centre|finish} where the project measures its rooms' areas, perimeters and IFC spaces, as Revit's Area and \
+         Volume Computations: at the walls' centre lines (`centre`, as a project starts) or at their finish faces \
+         (`finish`, the floor inside the walls: the área útil Brazilian codes ask for). Rooms keep their points; only their \
+         measured outline changes. IFC spaces carry both areas in Qto_SpaceBaseQuantities whichever is chosen",
+        room_area,
+    ),
+    edit(
         "language",
         "Project Language",
         &[],
-        "{code?: en|pt|es|vi} the language the project's drawings speak (a stair's UP, a title block's SCALE, a schedule's \
+        "{code?: en|pt|es|sv|cs|fr|vi} the language the project's drawings speak (a stair's UP, a title block's SCALE, a schedule's \
          headings) and new names come in (levels, sections, elevations, sheets, rooms, schedules): English, Brazilian \
-         Portuguese, Spanish or Vietnamese. What's already named stays named",
+         Portuguese, Spanish, Swedish, Czech, French or Vietnamese. What's already named stays named",
         language,
+    ),
+    edit(
+        "standard",
+        "Technical Standards",
+        &[],
+        "{set?: nbr|iso|ansi|eu|jis, adapt_all?: bool, adapt_line_weights?: bool, adapt_object_styles?: bool, adapt_units?: bool} configures the project's technical standard (NBR, ISO, ANSI, EU, JIS) \
+         and adapts line weights (pens), sheet layouts, object styles, and dimensioning conventions. \
+         NBR includes NBR 16861, NBR 16752, NBR 17006, NBR 17067, NBR 17068, and NBR 6492. \
+         The numbers each standard sets (margins, folds, pens, per-category pens) came with the contribution that added them and \
+         have not been checked against the standards named. Without `set`, reports the current standard and available standards",
+        standard,
     ),
     other("inspect", "Inspect", "{} levels, element counts, types, warnings and undo history", inspect),
     other(
         "render",
         "Render",
         "{view?: a level's, section's or elevation's name or id, a sheet's number, or {3D}, ceiling?, width?, height?, path?, \
-         azimuth?, elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
+         azimuth?, elevation?, eye_elevation?} a level's floor plan (with `ceiling`, its reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
          `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up (by default from the south-east, \
-         30° up), as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
+         30° up), fitted; in perspective (see `perspective`) through its lens, and with `eye_elevation` from an eye that high \
+         (mm) looking at the same point, as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
          elevation or sheet that could not draw something as asked (a fill pattern too dense for the view, more ink behind \
          a region than is kept above it) says so in the reply's `notes`",
         render_view,
@@ -1133,7 +1294,7 @@ pub static ALL: &[Command] = &[
         ui_msg!("Schedule"),
         &[],
         "{name?, category?, fields?, filters?, sort?, grouped?, path?} a schedule view, as Revit's View > Schedules makes one, \
-         and its table: columns, rows, the `elements` each row lists, and totals (and a .csv file with a path). A new one needs `name` and `category`: rooms, \
+         and its table: columns, rows, the `elements` each row lists, and totals (and a .csv file with a path, or an .xlsx workbook for a path ending .xlsx). A new one needs `name` and `category`: rooms, \
          doors, windows, walls, floors, ceilings, roofs, columns, structural columns, footings, beams, strip footings, components, \
          stairs, ramps, railings or levels; `category` \
          alone reads its own (Room Schedule, Door Schedule, Window Schedule, Wall Schedule, Floor Schedule, Level Schedule, \
@@ -1189,6 +1350,17 @@ pub static ALL: &[Command] = &[
          picked. A corner not given stays where it was; turned on with none, it's fitted round the model, 300 mm clear of \
          it. `on: false` turns it off and keeps its extents for when it's turned on again",
         section_box,
+    ),
+    edit(
+        "perspective",
+        "Perspective",
+        &[],
+        "{view?: a 3D view's name or id ({3D} unless given), on?: true | false (true unless given), lens?: mm} a 3D view seen \
+         in perspective, as through a camera, or with `on: false` parallel (axonometric) again, as the ViewCube's Toggle to \
+         Perspective and Toggle to Parallel do. `lens` is the focal length it is seen through, 10 to 600 mm on a 35 mm camera \
+         (whose 36 mm of film is the picture's width): 35 unless given or set before; turned off, it keeps it. The eye stands \
+         back from the middle of the picture as far as the lens and the zoom say; `render` takes how high it stands",
+        perspective,
     ),
     edit(
         "filter",
@@ -1274,6 +1446,107 @@ pub static ALL: &[Command] = &[
         run: measure,
         undoable: false,
     },
+    other(
+        "circuit",
+        "Size a Circuit",
+        "{load, apparent?, demand?, power_factor?, phases?: FN|FF|3F|3FN, system?: 127/220|220/380|230/400, use?: lighting|power, length?, \
+         method?, insulation?: pvc|epr, conductor?: flexible|rigid, ambient?, grouped?, bundle?, spacing?, soil?, section?, breaker?, \
+         drop_limit?, reduced_neutral?} one electrical circuit sized as NBR 5410:2004 asks, for copper: `load` in W (or VA with \
+         `apparent`), `demand` (0 to 1, 1) and `power_factor` (over 0 to 1, 1; a first value, not a claim about the load), `phases` \
+         (FN one phase and neutral, the default; FF; 3F; 3FN balanced), the voltage `system` (127/220), `use` (power: 2.5 mm² at least; \
+         lighting 1.5), `length` to the farthest load (mm; none: no drop is checked), the installation `method` of Tabela 33 (7: a \
+         conduit in masonry; also 1 to 8, 11, 11A, 61, 61A), `insulation` (pvc 70 °C, or epr 90 °C), `conductor` (flexible, the larger \
+         resistance; or rigid), `ambient` °C (30 in air, 20 in soil), `grouped` circuits in the conduit (this one included), `bundle` \
+         (method 11 cables bundled), `spacing` between buried conduits (mm) and `soil` resistivity (K·m/W), and a `section` (mm²) and \
+         `breaker` (A) already chosen, which are never made smaller. Replies with the design current, the section and breaker that give \
+         I_B ≤ I_n ≤ I_Z (which gives I_2 = 1.45 I_n ≤ 1.45 I_Z for the breakers of NBR NM 60898) with the drop within `drop_limit` (4 %), the current the section carries, the drop, \
+         the conductors (phases, neutral, protective), the factors, and what the chosen section and breaker give. It changes nothing; \
+         aluminium, trays, several layers, short circuit and harmonics are not checked. It has no shortcut: Revit has no tool for it",
+        circuit,
+    ),
+    other(
+        "conduit_fill",
+        "Conduit Fill",
+        "{section, phases?: FN|FF|3F|3FN, circuits?, reduced_neutral?, family?, size?} the fill of a conduit as NBR 5410 asks, for the \
+         conductors of a circuit (its phases, neutral and protective conductor, of `section` mm²) times `circuits` in the same conduit \
+         (1): their cross-sections by outside diameter over the conduit's inside, at most 53 % for one cable, 31 % for two, 40 % for \
+         three or more. `family` (pvc-thread, pvc-solder, steel-heavy, steel-rir; pvc-thread) and `size` (its mark, e.g. 3/4\"; none: \
+         the smallest that fits). The dimensions are the makers' own from their catalogues, each family naming maker, document, page \
+         and address; the inside diameter is the outside less twice the wall. The data covers the flexible 750 V PVC cable of 0.5 to \
+         240 mm² only: there is no `insulation` key, and a section above 240 mm² is `pending`, never guessed. `sections_mm2` lists the \
+         conductors of one circuit (`circuits` of them are in the conduit). Cable trays are not sized. It has no shortcut: Revit has no \
+         tool for it. It changes nothing",
+        conduit_fill,
+    ),
+    other(
+        "drain_size",
+        "Size a Sanitary Drain",
+        "{units?, fixtures?: {wc?, lav?, sink?, shower?, laundry?}, role?: branch|main|stack, slope?, floors?, min_dn?} the DN of a \
+         sanitary drain as NBR 8160 asks, by the fixture units (UHC) it carries: `units`, or `fixtures` counted (Tabela 3: a water \
+         closet 6 UHC and DN 100, a lavatory 1 and 40, a sink 3 and 50, a shower 2 and 40, a laundry tub 3 and 40; the drain is never \
+         smaller than the fixtures' own). `role`: a `branch` (ramal de esgoto, Tabela 5, the default), a `main` (subcoletor or coletor \
+         predial, Tabela 7 by `slope`, a fraction, 0.01 by default; DN 100 at least) or a `stack` (tubo de queda, Tabela 6 by the \
+         building's `floors`, up to three or more). `min_dn` is the largest drain flowing into it. Replies with the `dn`, what it \
+         carries (`capacity`) and the `minimum_dn` the fixtures ask. A blank in the standard's table means not allowed: DN 100 and 150 \
+         carry nothing in a building drain at 0.5 %, and a branch or a building drain never borrows the other's table. For a `main` \
+         every fixture given counts, where item 5.1.4.2 counts only the largest fixture of each bathroom in a residential building: pass `units` already \
+         reduced to follow it. It has no shortcut: Revit has no tool for it. It changes nothing",
+        drain_size,
+    ),
+    other(
+        "vent_size",
+        "Size a Sanitary Vent",
+        "{units, wc?, stack_dn?, length?, trap_dn?} the DN of a sanitary vent as NBR 8160 asks, by the units (UHC) of what it vents: a \
+         branch vent (ramal de ventilação, Tabela 8; `wc` says a water closet is in the group), or, with `stack_dn` (the DN of the \
+         stack or drain served) and `length` (mm, from its foot to its open end), a vent stack or header (Tabela 2). `trap_dn` adds the \
+         longest run from a trap of that DN to its vent (Tabela 1). It has no shortcut: Revit has no tool for it. It changes nothing",
+        vent_size,
+    ),
+    other(
+        "hydrant_size",
+        "Size Hydrants",
+        "{column?: 1-5, area?, type?: 1|2|3|4-40|4-65|5, hydrants?, inside?, nominal?, material?: steel|steel-wet|copper|pvc|pex, length?, rise?} \
+         hydrants and hose reels as IT 22/2025 of the CBPMESP asks. With `column` (of Tabela 3, by the occupation) and `area` (m², \
+         built) it replies the system type and the fire reserve (m³). With `type` (Tabela 2; 4 comes as 4-40 or 4-65 by its nozzle) \
+         it replies the design flow, that of the two most unfavourable jets (`hydrants`, 2 by default), and the head at the nozzle; \
+         with `inside` (mm) it also replies the speed (5 m/s at most), the Hazen-Williams head loss over `length` (m) of the \
+         `material` (Tabela 1: `steel` is black steel in a dry system, C 100, the lowest steel row and the default, `steel-wet` is galvanised or wet, C 120), the head needed at the start of the pipe with its `rise` (mm, up) and, with `nominal` (mm), whether \
+         the pipe is big enough (DN 65; DN 50 for types 1 and 2). `length` and `rise` are in millimetres. `need_mca` is the nozzle \
+         head + the head loss of the straight pipe + the rise: it leaves out the hose, the fittings and the pressure at the source \
+         (`need_covers` says so), and `ok` is only the nozzle head within 100 mca, the speed and the pipe's size (`ok_covers`), not \
+         a verdict on the design. A `type` that contradicts `column` and `area` is an error. Notes 1 and 2 of Tabela 3 (a system one type lower in some cases) are not applied. `region` is SP, the only one: this is the \
+         São Paulo rule, and no other state's. It has no shortcut: Revit has no tool for it. It changes nothing",
+        hydrant_size,
+    ),
+    other(
+        "water_size",
+        "Size Cold Water Pipes",
+        "{fixtures?: {wc, lav, sink, shower, laundry: count}, flow?, method?: weights|sum, dn?, length?, fittings?: {elbow90, elbow45, \
+         tee_through, tee_side, gate, globe, check: count}, pressure?, rise?} a cold water pipe of PVC soldável as NBR 5626 asks. The \
+         flow is `flow` (L/s), or the design flow of the `fixtures` by the `method` the project chooses: weights (the empirical \
+         method, Q = 0.3 √ΣP, never more than the fixtures' own flows; the default) or sum (every fixture at once). The fixture \
+         flows and weights are Tigre's (Manual Técnico, page 198), not the standard's; `wc` is the WC with a flush tank only (a flush-valve WC \
+         is not in the table here). Without `dn` it replies the smallest DN chosen by speed alone (3 m/s at most; the pressure is \
+         not used to choose it); with `dn`, whether that pipe keeps the speed. The head loss is Darcy-Weisbach (Colebrook, PVC at \
+         20 °C) over `length` (mm) plus the equivalent length of the `fittings`; with `pressure` (kPa, dynamic, upstream) and `rise` \
+         (mm, up) it replies the pressure left at the end, 10 kPa at least at a point of use, and `ok` covers both; without `pressure` \
+         `ok` is the speed alone (`ok_covers` says which). It has no shortcut: Revit has no tool for it. It changes nothing",
+        water_size,
+    ),
+    other(
+        "storm_size",
+        "Size a Storm Drain",
+        "{kind: downpipe|horizontal, area?, rainfall?, flow?, outlet?: edge|funnel, gutter?, length?, slope?, inside?} a storm drain as \
+         NBR 10844 asks. The flow is `flow` (L/min), or the rain on `area` (m², as the standard counts a roof) at `rainfall` (mm/h; \
+         150 by default, which the standard allows for up to 100 m² only: above that `rainfall` is required): Q = I·A/60. A `downpipe` (condutor vertical) takes the inner diameter of the \
+         standard's Figure 3 abacuses by Q, the water depth in the gutter `gutter` (50 to 100 mm), its `length` (mm, 0.3 m or more) \
+         and the gutter's `outlet` (edge: sharp-edged, the default; funnel); 70 mm inside at least. A `horizontal` drain takes \
+         Manning at two thirds full (n 0.011, PVC only, from the standard's Table 2) at its `slope` (a fraction, 0.005 at least): the inner \
+         diameter it needs, and with `inside` (mm) whether that pipe carries the flow. Off the abacuses (more than 150 mm inside) \
+         nothing is read. A key that does not apply to the `kind`, or `flow` together with `area`, is an error. It has no shortcut: \
+         Revit has no tool for it. It changes nothing",
+        storm_size,
+    ),
     other(
         "library",
         "Library",
@@ -1361,6 +1634,21 @@ fn points(c: &str, p: &Value, key: &str) -> Result<Vec<P2>, String> {
     a.iter().map(|v| point(v).ok_or_else(|| bad(c, format!("`{key}`: {v} is not a point [x, y] in mm")))).collect()
 }
 
+/// `[x, y, z]` in mm, finite and within the model's limits.
+fn point3(v: &Value) -> Option<[f64; 3]> {
+    let [x, y, z] = v.as_array()?.as_slice() else { return None };
+    let p = [x.as_f64()?, y.as_f64()?, z.as_f64()?];
+    p.iter().all(|c| c.is_finite() && c.abs() <= MAX_COORD).then_some(p)
+}
+
+fn points3(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
+    let a = p.get(key).and_then(Value::as_array).ok_or_else(|| bad(c, format!("`{key}` [[x, y, z], …] is required")))?;
+    if a.len() > MAX_POINTS {
+        return Err(bad(c, format!("`{key}` has more than {MAX_POINTS} points")));
+    }
+    a.iter().map(|v| point3(v).ok_or_else(|| bad(c, format!("`{key}`: {v} is not a point [x, y, z] in mm")))).collect()
+}
+
 fn num(c: &str, p: &Value, key: &str) -> Result<Option<f64>, String> {
     match p.get(key) {
         v if absent(v) => Ok(None),
@@ -1389,6 +1677,17 @@ fn string(c: &str, p: &Value, key: &str) -> Result<Option<String>, String> {
         Some(v) => Err(bad(c, format!("`{key}` must be text of at most {MAX_TEXT} characters, got {v}"))),
         None => Ok(None),
     }
+}
+
+/// How a door or a window opens, by its name; blank, not said.
+fn operation(c: &str, name: &str) -> Result<Option<crate::model::Operation>, String> {
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    crate::model::Operation::parse(name).map(Some).ok_or_else(|| {
+        let names: Vec<&str> = crate::model::Operation::ALL.iter().map(|o| o.name()).collect();
+        bad(c, format!("`operation` is one of {}, not `{name}`", names.join(", ")))
+    })
 }
 
 /// An element of `m` by its id, or its GUID.
@@ -1595,9 +1894,42 @@ pub(crate) fn tidy(ring: &[P2]) -> Vec<P2> {
     ring
 }
 
-/// One past the largest number among `taken` ("1" when there is none).
+/// The next in the series `taken` is numbered in: one past its largest number, "1" when there is none.
+/// A series is plain numbers ("1", "2") or numbers after a prefix ("P1", "P2", "J-01"); a prefix
+/// counts as a series once two marks share it and they outnumber the plain numbers, so a lone "D2"
+/// among numbered doors stays an exception. Zero padding is kept ("P09" → "P10"), and the result
+/// is never one already taken. A mark longer than a name may be (`MAX_TEXT`) is no part of a series.
 pub(crate) fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
-    taken.filter_map(|t| t.trim().parse::<u64>().ok()).max().unwrap_or(0).saturating_add(1).to_string()
+    let taken: Vec<&str> = taken.map(str::trim).collect();
+    // Each series by its prefix: how many marks it has, its largest number and the width its zero-padded ones keep.
+    let mut series: BTreeMap<&str, (usize, u64, usize)> = BTreeMap::new();
+    for t in taken.iter().filter(|t| t.len() <= MAX_TEXT) {
+        let digits = t.len() - t.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let (prefix, number) = t.split_at(t.len() - digits);
+        let Ok(n) = number.parse::<u64>() else { continue };
+        let s = series.entry(prefix).or_insert((0, 0, 0));
+        s.0 += 1;
+        s.1 = s.1.max(n);
+        if number.len() > 1 && number.starts_with('0') {
+            s.2 = s.2.max(digits);
+        }
+    }
+    let plain = series.get("").map_or(0, |s| s.0);
+    let (prefix, (_, last, width)) = series
+        .iter()
+        .filter(|(p, s)| p.is_empty() || (s.0 >= 2 && s.0 > plain))
+        .max_by_key(|(p, s)| (s.0, s.1, std::cmp::Reverse(**p)))
+        .map_or(("", (0, 0, 0)), |(p, s)| (*p, *s));
+    // A mark longer than a name may be starts no series, so no width passes MAX_TEXT; this keeps it so.
+    let width = if prefix.is_empty() { 0 } else { width.min(MAX_TEXT) };
+    let mut n = last;
+    loop {
+        n = n.saturating_add(1);
+        let next = format!("{prefix}{n:0width$}");
+        if !taken.contains(&next.as_str()) || n == u64::MAX {
+            return next;
+        }
+    }
 }
 
 /// Revit-style grid naming: the letter after the last grid's letter, else the next number.
@@ -1656,6 +1988,11 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         Element::RoomSeparator(rs) => {
             extra.insert("length".into(), json!(hundredth(rs.start.dist(rs.end))));
         }
+        Element::Rebar(rb) => {
+            let length = rebar::length(&rb.path);
+            extra.insert("length".into(), json!(hundredth(length)));
+            extra.insert("weight_kg".into(), json!((rebar::weight_kg(rb.diameter, length) * 1000.0).round() / 1000.0));
+        }
         Element::PointCloud(pc) => {
             if let Some(cloud) = m.clouds.get(&pc.cloud) {
                 extra.insert("points".into(), json!(cloud.len()));
@@ -1678,6 +2015,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {
                 extra.insert("width".into(), json!(t.width));
                 extra.insert("height".into(), json!(t.height));
+                if let Some(op) = t.operation {
+                    extra.insert("operation".into(), json!(op.name()));
+                }
                 extra.insert("level".into(), json!(w.level));
                 extra.insert("at".into(), json!(m.anchor(id)));
                 // Of a family: every parameter's value, worked out.
@@ -1693,6 +2033,7 @@ pub fn element_json(m: &Model, id: Id) -> Value {
         }
         Element::Dimension(d) => {
             extra.insert("values".into(), json!(m.dimension_values(d).into_iter().map(hundredth).collect::<Vec<_>>()));
+            extra.insert("labels".into(), json!(m.dimension_labels(d)));
         }
         // Every parameter's value, worked out, and how high it reaches over its base.
         Element::Component(cp) => {
@@ -1819,8 +2160,9 @@ pub fn element_json(m: &Model, id: Id) -> Value {
             extra.insert("area_m2".into(), json!(region.as_ref().map_or(0.0, |g| m2(g.area()))));
             extra.insert("perimeter_m".into(), json!(region.as_ref().map_or(0.0, |g| (g.perimeter() / 10.0).round() / 100.0)));
         }
-        Element::Text(_) => {
+        Element::Text(n) => {
             extra.insert("level".into(), json!(m.level_of(e)));
+            extra.insert("size".into(), json!(m.text_types.get(&n.type_name).map(|t| t.size)));
         }
         Element::DetailGroup(g) => {
             extra.insert("members".into(), json!(m.detail_groups.get(&g.type_name).map_or(0, |t| t.members.len())));
@@ -1881,9 +2223,8 @@ fn new(s: &mut Session, p: &Value) -> R {
 }
 
 fn language_param(c: &str, code: &str) -> Result<Language, String> {
-    Language::from_code(code).ok_or_else(|| {
-        bad(c, format!("`{code}` is no language here; there are en (English), pt (Português), es (Español) and vi (Tiếng Việt)"))
-    })
+    let codes = "en, pt, es, sv, cs, fr or vi";
+    Language::from_code(code).ok_or_else(|| bad(c, format!("`{code}` is no language here; use {codes}")))
 }
 
 fn language(s: &mut Session, p: &Value) -> R {
@@ -2289,12 +2630,25 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         let (azimuth, elevation) = (num(c, p, "azimuth")?.unwrap_or(view3d::AZIMUTH), num(c, p, "elevation")?.unwrap_or(view3d::ELEVATION));
         let scene = view3d::Scene::new(m);
         let look = Look::of_3d(m);
-        let png = scene.render_in(&scene.fit_in(azimuth, elevation, w3, h3, &look), &[], &look).png().map_err(|e| bad(c, e))?;
+        // Through the view's lens, if it's in perspective, and from as high as the eye is put.
+        let lens = m.default_3d().and_then(|v| match m.elements.get(v) {
+            Some(Element::View3D(v3)) => v3.lens(),
+            _ => None,
+        });
+        let fitted = scene.fit_from(view3d::Camera { lens, ..scene.fit_in(azimuth, elevation, w3, h3, &look) }, &look);
+        let cam = match (num(c, p, "eye_elevation")?, lens) {
+            (Some(z), Some(_)) if z.is_finite() && z.abs() <= MAX_COORD => fitted.with_eye_elevation(z),
+            (Some(z), Some(_)) => return Err(bad(c, format!("`eye_elevation`: {z} mm is not a usable height"))),
+            (Some(_), None) => return Err(bad(c, "a parallel 3D view has no eye to raise: turn it to perspective first (`perspective`)")),
+            (None, _) => fitted,
+        };
+        let png = scene.render_in(&cam, &[], &look).png().map_err(|e| bad(c, e))?;
         return png_reply(
             c,
             p,
             png,
-            json!({"width": w3, "height": h3, "view": "{3D}", "kind": "3D view", "azimuth": azimuth, "elevation": elevation}),
+            json!({"width": w3, "height": h3, "view": "{3D}", "kind": "3D view", "azimuth": cam.azimuth, "elevation": cam.elevation,
+                "lens": lens, "eye_elevation": cam.eye_elevation()}),
         );
     }
     // A section or elevation, by name or id.
@@ -2426,7 +2780,14 @@ fn schedule(s: &mut Session, p: &Value) -> R {
         if changed {
             m.check().map_err(|e| bad(c, e))?;
         }
-        std::fs::write(&path, crate::schedule::to_csv(&t)).map_err(|e| bad(c, format!("{path}: {e}")))?;
+        // A workbook for a path ending .xlsx, else CSV.
+        let bytes = if path.to_lowercase().ends_with(".xlsx") {
+            let sheet = if sc.name.is_empty() { category(&sc.of) } else { sc.name.clone() };
+            crate::schedule::to_xlsx(&t, &sheet)
+        } else {
+            crate::schedule::to_csv(&t).into_bytes()
+        };
+        std::fs::write(&path, bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
     }
     let columns: Vec<String> = t.columns.iter().map(|col| crate::schedule::heading(Units::Millimetres, col)).collect();
     let available: Vec<String> = crate::schedule::fields(m, &category(&sc.of)).into_iter().map(|(n, _)| n).collect();
@@ -2809,6 +3170,43 @@ fn section_box(s: &mut Session, p: &Value) -> R {
         v3.section_box = Some(b);
     }
     Ok(json!({"view": v, "on": b.on, "min": b.min, "max": b.max}))
+}
+
+fn perspective(s: &mut Session, p: &Value) -> R {
+    let c = "perspective";
+    let m = &s.model;
+    let default = absent(p.get("view"))
+        || matches!(p.get("view"), Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
+    // The default 3D view is made when it's first turned, as when its graphics first change.
+    let view = if default {
+        m.default_3d()
+    } else {
+        let v = view_param(c, m, p, false)?;
+        if !matches!(m.elements.get(v), Some(Element::View3D(_))) {
+            return Err(bad(c, format!("{} isn't a 3D view; only a 3D view is seen in perspective", view_title(m, v))));
+        }
+        Some(v)
+    };
+    let was = view.and_then(|v| match m.elements.get(v) {
+        Some(Element::View3D(v3)) => v3.perspective,
+        _ => None,
+    });
+    let on = match p.get("on") {
+        v if absent(v) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(v) => return Err(bad(c, format!("`on` must be true or false, got {v}"))),
+        None => true,
+    };
+    let lens = num(c, p, "lens")?.or(was.map(|w| w.lens)).unwrap_or(view3d::LENS);
+    let v = match view {
+        Some(v) => v,
+        None => s.model_mut().insert(Element::View3D(View3D::default_view())),
+    };
+    let set = Perspective { lens, on };
+    if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(v) {
+        v3.perspective = Some(set);
+    }
+    Ok(json!({"view": v, "on": on, "lens": lens}))
 }
 
 fn set_graphics(m: &mut Model, view: impl Key, g: Graphics) {
@@ -3348,6 +3746,550 @@ fn measure(_: &mut Session, p: &Value) -> R {
     Ok(json!({"length": to(r.length, 100.0), "dx": to(r.dx, 100.0), "dy": to(r.dy, 100.0), "angle": to(r.angle, 1e4)}))
 }
 
+/// A number of `key` within `lo..=hi`, or `default` when absent.
+fn within(c: &str, p: &Value, key: &str, default: f64, lo: f64, hi: f64) -> Result<f64, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .filter(|x| x.is_finite() && *x >= lo && *x <= hi)
+            .ok_or_else(|| bad(c, format!("`{key}` must be a number from {lo} to {hi}, got {v}"))),
+        None => Ok(default),
+    }
+}
+
+/// A choice among `names`, as text; `default` when absent.
+fn choice<'a>(c: &str, p: &'a Value, key: &str, names: &[&str], default: &'a str) -> Result<&'a str, String> {
+    match p.get(key) {
+        v if absent(v) => Ok(default),
+        Some(Value::String(t)) if names.contains(&t.as_str()) => Ok(t.as_str()),
+        Some(v) => Err(bad(c, format!("`{key}` must be one of {}, got {v}", names.join(", ")))),
+        None => Ok(default),
+    }
+}
+
+fn circuit(_: &mut Session, p: &Value) -> R {
+    use crate::nbr5410::{self as e, Circuit, Insulation, Phases, Use};
+    let c = "circuit";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &[
+        "load",
+        "apparent",
+        "demand",
+        "power_factor",
+        "phases",
+        "system",
+        "use",
+        "length",
+        "method",
+        "insulation",
+        "conductor",
+        "ambient",
+        "grouped",
+        "bundle",
+        "spacing",
+        "soil",
+        "section",
+        "breaker",
+        "drop_limit",
+        "reduced_neutral",
+    ];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let load = within(c, p, "load", 0.0, 0.0, 1.0e9)?;
+    if load <= 0.0 {
+        return Err(bad(c, "`load` (W, or VA with `apparent`) is required"));
+    }
+    let systems: Vec<&str> = e::SYSTEMS.iter().map(|s| s.0).collect();
+    let system = choice(c, p, "system", &systems, systems[0])?;
+    let methods = e::method_keys();
+    let sections_ok = |x: f64| e::SECTIONS.iter().any(|s| (s - x).abs() < 1e-9);
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section > 0.0 && !sections_ok(section) {
+        return Err(bad(
+            c,
+            format!(
+                "`section` must be one of the standard's: {}",
+                e::SECTIONS.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+    let breaker = within(c, p, "breaker", 0.0, 0.0, 1000.0)?;
+    if breaker > 0.0 && !e::BREAKERS.iter().any(|b| (b - breaker).abs() < 1e-9) {
+        return Err(bad(
+            c,
+            format!("`breaker` must be one of: {}", e::BREAKERS.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ")),
+        ));
+    }
+    let ambient = match p.get("ambient") {
+        v if absent(v) => None,
+        _ => Some(within(c, p, "ambient", 30.0, -50.0, 200.0)?),
+    };
+    let circuit = Circuit {
+        load,
+        apparent: flag(c, p, "apparent")?,
+        demand: within(c, p, "demand", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        power_factor: within(c, p, "power_factor", 1.0, f64::MIN_POSITIVE, 1.0)?,
+        phases: Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral),
+        system: systems.iter().position(|s| *s == system).unwrap_or(0),
+        use_: if choice(c, p, "use", &["power", "lighting"], "power")? == "lighting" { Use::Lighting } else { Use::Power },
+        length: within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0,
+        method: choice(c, p, "method", &methods, "7")?.to_string(),
+        insulation: Insulation::parse(choice(c, p, "insulation", &["pvc", "epr"], "pvc")?).unwrap_or(Insulation::Pvc),
+        flexible: choice(c, p, "conductor", &["flexible", "rigid"], "flexible")? == "flexible",
+        ambient,
+        grouped: within(c, p, "grouped", 1.0, 1.0, 1000.0)?.round() as u32,
+        bundle: flag(c, p, "bundle")?,
+        spacing: within(c, p, "spacing", 0.0, 0.0, 100_000.0)? / 1000.0,
+        soil: within(c, p, "soil", 2.5, 0.0, 100.0)?,
+        section,
+        breaker,
+        drop_limit: within(c, p, "drop_limit", e::DROP_LIMIT, f64::MIN_POSITIVE, 100.0)?,
+        reduced_neutral: flag(c, p, "reduced_neutral")?,
+    };
+    let d = e::design(&circuit);
+    if let Some(fault) = d.fault {
+        return Err(bad(c, fault.message()));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let evaluation = |v: &e::Evaluation| {
+        json!({"section_mm2": v.section, "breaker_a": v.breaker, "carries_a": round(v.carries, 100.0), "carries_ok": v.ampacity_ok,
+               "breaker_ok": v.breaker_ok, "drop_percent": v.drop.map(|d| round(d.0, 100.0)), "drop_ok": v.drop.map(|d| d.1),
+               "minimum_section_ok": v.minimum_ok})
+    };
+    let Some(n) = d.needed else { return Err(bad(c, e::Fault::TooBig.message())) };
+    Ok(json!({
+        "current_a": round(d.current, 100.0),
+        "volts": d.volts,
+        "minimum_section_mm2": d.minimum,
+        "factors": d.factors.map(|f| json!({"temperature": f.temperature, "grouping": f.grouping, "soil": f.soil})),
+        "section_mm2": n.section,
+        "breaker_a": n.breaker,
+        "carries_a": round(n.carries, 100.0),
+        "drop_percent": n.drop.map(|d| round(d.0, 100.0)),
+        "conductors": e::cable_text(circuit.phases, n.section, circuit.reduced_neutral),
+        "grew": section < n.section - 1e-9 || breaker < n.breaker - 1e-9,
+        "chosen": d.chosen.as_ref().map(evaluation),
+    }))
+}
+
+fn conduit_fill(_: &mut Session, p: &Value) -> R {
+    use crate::conduit::{self, FAMILIES};
+    use crate::nbr5410::Phases;
+    let c = "conduit_fill";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["section", "phases", "circuits", "reduced_neutral", "family", "size"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let section = within(c, p, "section", 0.0, 0.0, 1000.0)?;
+    if section <= 0.0 {
+        return Err(bad(c, "`section` (mm²) is required"));
+    }
+    let phases = Phases::parse(choice(c, p, "phases", &["FN", "FF", "3F", "3FN"], "FN")?).unwrap_or(Phases::PhaseNeutral);
+    let circuits = within(c, p, "circuits", 1.0, 1.0, 1000.0)?.round() as usize;
+    let keys: Vec<&str> = FAMILIES.iter().map(|f| f.key).collect();
+    let family = conduit::family(choice(c, p, "family", &keys, "pvc-thread")?).ok_or_else(|| bad(c, "no such family"))?;
+    let one = conduit::conductors(phases, section, flag(c, p, "reduced_neutral")?);
+    let all: Vec<f64> = (0..circuits).flat_map(|_| one.iter().copied()).collect();
+    let source = json!({"maker": family.maker, "document": family.document, "page": family.page, "url": family.url, "inside": "outside less twice the wall"});
+    if let Some(s) = one.iter().find(|s| conduit::cable_diameter(**s).is_none()) {
+        return Ok(
+            json!({"conductors": all.len(), "pending": format!("the catalogue has no outside diameter for a cable of {s} mm²"), "source": source}),
+        );
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let smallest = conduit::smallest(family, &all).map(|s| s.0);
+    let size =
+        match string(c, p, "size")? {
+            None => None,
+            Some(mark) => Some(family.sizes.iter().find(|s| s.0 == mark).ok_or_else(|| {
+                bad(c, format!("`size` must be one of {}", family.sizes.iter().map(|s| s.0).collect::<Vec<_>>().join(", ")))
+            })?),
+        };
+    let fill = size.and_then(|s| conduit::fill(s, &all));
+    Ok(json!({
+        "conductors": all.len(),
+        "circuits": circuits,
+        "sections_mm2": one,
+        "smallest": smallest,
+        "size": size.map(|s| s.0),
+        "inside_mm": size.map(|s| round(conduit::inside(s), 100.0)),
+        "fill_percent": fill.map(|f| round(f.ratio * 100.0, 10.0)),
+        "limit_percent": fill.map(|f| round(f.limit * 100.0, 10.0)),
+        "ok": fill.map(|f| f.ok),
+        "source": source,
+    }))
+}
+
+fn drain_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage::{self, FIXTURES, Role};
+    let c = "drain_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "fixtures", "role", "slope", "floors", "min_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let mut units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    let mut minimum = within(c, p, "min_dn", 0.0, 0.0, 1000.0)?;
+    let mut fixtures_dn = 0.0;
+    match p.get("fixtures") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            let mut sum = 0.0;
+            for (kind, n) in f {
+                let (u, dn) = drainage::fixture(kind).ok_or_else(|| {
+                    bad(c, format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")))
+                })?;
+                let n = n
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+                    .ok_or_else(|| bad(c, format!("`fixtures`: `{kind}` must be a whole number from 0 to 10000, got {n}")))?;
+                sum += u * n;
+                if n > 0.0 {
+                    fixtures_dn = f64::max(fixtures_dn, dn);
+                }
+            }
+            units += sum;
+        }
+        Some(v) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        None => {}
+    }
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC) or `fixtures` is required"));
+    }
+    minimum = minimum.max(fixtures_dn);
+    let role = Role::parse(choice(c, p, "role", &["branch", "main", "stack"], "branch")?).unwrap_or(Role::Branch);
+    let slope = within(c, p, "slope", 0.01, 0.0, 1.0)?;
+    let floors = within(c, p, "floors", 1.0, 1.0, 1000.0)?.round() as u32;
+    let dn = drainage::smallest(units, slope, role, floors, minimum)
+        .ok_or_else(|| {
+        let most = drainage::DNS.iter().map(|dn| (*dn, drainage::capacity(*dn, slope, role, floors))).fold((0.0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
+        bad(
+            c,
+            format!(
+                "{units} UHC is more than the tables of this version list for this role and slope: the most is DN {} at {} UHC (a blank in the standard's table means not allowed, not that the tables ended); split the load, or give a steeper `slope`",
+                most.0, most.1
+            ),
+        )
+    })?;
+    Ok(json!({"units": units, "dn": dn, "capacity": drainage::capacity(dn, slope, role, floors), "minimum_dn": minimum}))
+}
+
+fn vent_size(_: &mut Session, p: &Value) -> R {
+    use crate::drainage;
+    let c = "vent_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["units", "wc", "stack_dn", "length", "trap_dn"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let units = within(c, p, "units", 0.0, 0.0, 1.0e7)?;
+    if units <= 0.0 {
+        return Err(bad(c, "`units` (UHC of what it vents) is required"));
+    }
+    let dns = drainage::DNS;
+    let mut out = serde_json::Map::new();
+    let dn = if absent(p.get("stack_dn")) {
+        drainage::branch_vent(units, flag(c, p, "wc")?)
+            .ok_or_else(|| bad(c, format!("{units} UHC is more than the table gives a branch vent (Tabela 8)")))?
+    } else {
+        let served = within(c, p, "stack_dn", 0.0, 0.0, 1000.0)?;
+        if !dns.iter().any(|d| (d - served).abs() < 1e-9) {
+            return Err(bad(c, format!("`stack_dn` must be one of {}", dns.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", "))));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (mm, from the foot to the open end) is required with `stack_dn`"));
+        }
+        let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+        let dn = drainage::vent_stack(served, units, length)
+            .ok_or_else(|| bad(c, "no vent of the table (Tabela 2) is long enough for that, or the units pass its last row"))?;
+        out.insert("longest_m".into(), json!(drainage::vent_stack_limit(served, units, dn)));
+        dn
+    };
+    out.insert("dn".into(), json!(dn));
+    if !absent(p.get("trap_dn")) {
+        let t = within(c, p, "trap_dn", 0.0, 0.0, 1000.0)?;
+        let mm = drainage::trap_distance(t).ok_or_else(|| bad(c, "`trap_dn` must be 40, 50, 75 or 100 (Tabela 1)"))?;
+        out.insert("trap_to_vent_mm".into(), json!(mm));
+    }
+    Ok(Value::Object(out))
+}
+
+fn hydrant_size(_: &mut Session, p: &Value) -> R {
+    use crate::hydrant::{self, MATERIALS, MAX_NOZZLE_HEAD, MAX_SPEED, TYPE_KEYS};
+    let c = "hydrant_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["region", "column", "area", "type", "hydrants", "inside", "nominal", "material", "length", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    if string(c, p, "region")?.is_some_and(|r| r != "SP") {
+        return Err(bad(
+            c,
+            "`region` must be SP: only IT 22/2025 of the Corpo de Bombeiros of São Paulo is covered, no other state's rule",
+        ));
+    }
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let (has_column, has_area) = (!absent(p.get("column")), !absent(p.get("area")));
+    let mut system: Option<(u8, f64)> = None;
+    if has_column || has_area {
+        if !has_column {
+            return Err(bad(c, "`column` (1 to 5, of IT 22's Tabela 3) is required with `area`"));
+        }
+        if !has_area {
+            return Err(bad(c, "`area` (m², built) is required with `column`"));
+        }
+        let column = within(c, p, "column", 1.0, 1.0, 5.0)?;
+        if column.fract() != 0.0 {
+            return Err(bad(c, "`column` must be a whole number from 1 to 5"));
+        }
+        let area = within(c, p, "area", 0.0, f64::MIN_POSITIVE, 1.0e8)?;
+        system = hydrant::system_for(column as u8, area);
+    }
+    let mut out = serde_json::Map::new();
+    if let Some((t, rti)) = system {
+        out.insert("system".into(), json!(t.to_string()));
+        out.insert("reserve_m3".into(), json!(rti));
+    }
+    let key = if absent(p.get("type")) {
+        match system {
+            Some((4, _)) if !absent(p.get("inside")) => {
+                return Err(bad(c, "the system is type 4: give `type` as 4-40 or 4-65, by the nozzle"));
+            }
+            Some((t, _)) if t != 4 => Some(t.to_string()),
+            Some(_) => None,
+            None => return Err(bad(c, "`type` (1, 2, 3, 4-40, 4-65 or 5) or `column` and `area` is required")),
+        }
+    } else {
+        let key = choice(c, p, "type", TYPE_KEYS, "")?;
+        if let (Some((t, _)), Some(row)) = (system, hydrant::kind(key))
+            && row.1 != t
+        {
+            return Err(bad(
+                c,
+                format!("`type` {key} contradicts `column` {} and `area`, which give type {t}: give one, or make them agree", p["column"]),
+            ));
+        }
+        Some(key.to_string())
+    };
+    let Some(key) = key else { return Ok(Value::Object(out)) };
+    let hydrants = within(c, p, "hydrants", 2.0, 1.0, 1000.0)?;
+    if hydrants.fract() != 0.0 {
+        return Err(bad(c, "`hydrants` must be a whole number from 1 to 1000"));
+    }
+    let Some(t) = hydrant::kind(&key) else { return Err(bad(c, format!("no system type `{key}`"))) };
+    let flow = hydrant::design_flow(&key, hydrants as u32);
+    out.insert("type".into(), json!(key));
+    out.insert("flow_lpm".into(), json!(flow));
+    out.insert("nozzle_head_mca".into(), json!(t.6));
+    out.insert("hose_dn_mm".into(), json!(t.3));
+    out.insert("hose_length_m".into(), json!(t.4));
+    let mut ok = t.6 <= MAX_NOZZLE_HEAD;
+    if absent(p.get("inside")) {
+        if !absent(p.get("nominal")) {
+            return Err(bad(c, "`nominal` needs the pipe's `inside` diameter (mm)"));
+        }
+        return Ok(Value::Object(out));
+    }
+    let inside = within(c, p, "inside", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+    let material = choice(c, p, "material", &MATERIALS.iter().map(|m| m.0).collect::<Vec<_>>(), "steel")?;
+    let cf = hydrant::hazen_c(material).unwrap_or(120.0);
+    let length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+    let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
+    let (v, j) = (hydrant::speed(flow, inside), hydrant::hazen_j(flow, cf, inside));
+    let loss = j * length;
+    let speed_ok = v <= MAX_SPEED + 1e-9;
+    ok = ok && speed_ok;
+    out.insert("speed_ms".into(), json!(round(v, 100.0)));
+    out.insert("speed_ok".into(), json!(speed_ok));
+    out.insert("head_loss_m_per_m".into(), json!(round(j, 1.0e5)));
+    out.insert("loss_mca".into(), json!(round(loss, 100.0)));
+    out.insert("need_mca".into(), json!(round(t.6 + loss + rise, 100.0)));
+    out.insert(
+        "need_covers".into(),
+        json!("nozzle head + head loss of the straight pipe + rise: not the hose, the fittings or the pressure at the source"),
+    );
+    if !absent(p.get("nominal")) {
+        let nominal = within(c, p, "nominal", 0.0, f64::MIN_POSITIVE, 5000.0)?;
+        let size_ok = nominal + 1e-9 >= hydrant::min_nominal(&key);
+        ok = ok && size_ok;
+        out.insert("size_ok".into(), json!(size_ok));
+    }
+    out.insert("ok".into(), json!(ok));
+    out.insert(
+        "ok_covers".into(),
+        json!("nozzle head within 100 mca, speed within 5 m/s and the pipe's size only: it is not a verdict on the design"),
+    );
+    Ok(Value::Object(out))
+}
+
+fn water_size(_: &mut Session, p: &Value) -> R {
+    use crate::water::{self, FITTINGS, FIXTURES, MAX_SPEED, MIN_USE_KPA, Method};
+    let c = "water_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["fixtures", "flow", "method", "dn", "length", "fittings", "pressure", "rise"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let whole = |key: &str, kind: &str, n: &Value| {
+        n.as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 10_000.0 && n.fract() == 0.0)
+            .ok_or_else(|| bad(c, format!("`{key}`: `{kind}` must be a whole number from 0 to 10000, got {n}")))
+    };
+    let method = Method::parse(choice(c, p, "method", &["weights", "sum"], "weights")?).unwrap_or(Method::Weights);
+    let flow = match (absent(p.get("flow")), p.get("fixtures")) {
+        (false, f) if !absent(f) => return Err(bad(c, "give `flow` or `fixtures`, not both")),
+        (false, _) => within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1000.0)?,
+        (true, Some(Value::Object(f))) => {
+            let mut list: Vec<(&str, f64)> = Vec::new();
+            for (kind, n) in f {
+                if water::fixture(kind).is_none() {
+                    return Err(bad(
+                        c,
+                        format!("`fixtures`: no fixture `{kind}`, use {}", FIXTURES.iter().map(|x| x.0).collect::<Vec<_>>().join(", ")),
+                    ));
+                }
+                let n = whole("fixtures", kind, n)?;
+                list.push((kind.as_str(), n));
+            }
+            water::design_flow(method, &list)
+        }
+        (true, Some(v)) if !absent(Some(v)) => return Err(bad(c, format!("`fixtures` must be an object {{kind: count}}, got {v}"))),
+        _ => 0.0,
+    };
+    if flow <= 0.0 {
+        return Err(bad(c, "`flow` (L/s) or `fixtures` is required"));
+    }
+    let dn = if absent(p.get("dn")) {
+        water::smallest_dn(flow).ok_or_else(|| bad(c, "no DN of PVC soldável (20 to 110) keeps the speed within 3 m/s at that flow"))?
+    } else {
+        let dn = within(c, p, "dn", 0.0, 0.0, 1000.0)?;
+        water::inside(dn).map(|_| dn).ok_or_else(|| bad(c, "`dn` must be one of 20, 25, 32, 40, 50, 60, 75, 85, 110 (PVC soldável)"))?
+    };
+    let inside = water::inside(dn).ok_or_else(|| bad(c, "`dn` is not a PVC soldável size"))?;
+    let mut length = within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0;
+    match p.get("fittings") {
+        v if absent(v) => {}
+        Some(Value::Object(f)) => {
+            for (kind, n) in f {
+                let le = water::equivalent_length(dn, kind)
+                    .ok_or_else(|| bad(c, format!("`fittings`: no fitting `{kind}`, use {}", FITTINGS.join(", "))))?;
+                length += le * whole("fittings", kind, n)?;
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`fittings` must be an object {{fitting: count}}, got {v}"))),
+        None => {}
+    }
+    let (speed, j) = water::head_loss(flow, inside, water::EPS_PVC);
+    let loss = j * length * water::KPA_PER_M;
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    let mut ok = speed <= MAX_SPEED + 1e-9;
+    let end = if absent(p.get("pressure")) {
+        None
+    } else {
+        let pressure = within(c, p, "pressure", 0.0, 0.0, 1.0e5)?;
+        let rise = within(c, p, "rise", 0.0, -MAX_COORD, MAX_COORD)? / 1000.0;
+        let end = pressure - loss - rise * water::KPA_PER_M;
+        ok = ok && end >= MIN_USE_KPA;
+        Some(end)
+    };
+    Ok(json!({
+        "flow_lps": round(flow, 1000.0),
+        "dn": dn,
+        "inside_mm": round(inside, 10.0),
+        "speed_ms": round(speed, 100.0),
+        "head_loss_m_per_m": round(j, 1.0e5),
+        "equivalent_length_m": round(length, 100.0),
+        "loss_kpa": round(loss, 100.0),
+        "end_kpa": end.map(|e| round(e, 100.0)),
+        "ok": ok,
+        "ok_covers": if end.is_some() { "the speed and the pressure left at the end" } else { "the speed alone: no pressure was given" },
+    }))
+}
+
+fn storm_size(_: &mut Session, p: &Value) -> R {
+    use crate::storm::{self, DEFAULT_RAIN, MIN_SLOPE, N_PVC, Off, Outlet};
+    let c = "storm_size";
+    let o = p.as_object().ok_or_else(|| bad(c, "params must be an object"))?;
+    const KEYS: &[&str] = &["kind", "area", "rainfall", "flow", "outlet", "gutter", "length", "slope", "inside"];
+    if let Some(key) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
+        return Err(bad(c, format!("unknown parameter `{key}`")));
+    }
+    let kind = choice(c, p, "kind", &["downpipe", "horizontal"], "")?;
+    if kind.is_empty() {
+        return Err(bad(c, "`kind` (downpipe or horizontal) is required"));
+    }
+    let mine: &[&str] = if kind == "downpipe" { &["outlet", "gutter", "length"] } else { &["slope", "inside"] };
+    if let Some(key) = ["outlet", "gutter", "length", "slope", "inside"].into_iter().find(|k| o.contains_key(*k) && !mine.contains(k)) {
+        return Err(bad(c, format!("`{key}` does not apply to a {kind}")));
+    }
+    if !absent(p.get("flow"))
+        && let Some(key) = ["area", "rainfall"].into_iter().find(|k| o.contains_key(*k))
+    {
+        return Err(bad(c, format!("`{key}` and `flow` are two ways to give the flow: give one")));
+    }
+    let outlet = Outlet::parse(choice(c, p, "outlet", &["edge", "funnel"], "edge")?).unwrap_or(Outlet::Edge);
+    let flow = if absent(p.get("flow")) {
+        let area = within(c, p, "area", 0.0, 0.0, 1.0e7)?;
+        if area <= 0.0 {
+            return Err(bad(c, "`area` (m², the roof that drains) or `flow` (L/min) is required"));
+        }
+        if area > storm::DEFAULT_RAIN_MAX_AREA && absent(p.get("rainfall")) {
+            return Err(bad(
+                c,
+                format!(
+                    "`rainfall` (mm/h, from the standard's table for the place and return period) is required above {} m²: the default {DEFAULT_RAIN} mm/h is for smaller roofs",
+                    storm::DEFAULT_RAIN_MAX_AREA
+                ),
+            ));
+        }
+        storm::design_flow(within(c, p, "rainfall", DEFAULT_RAIN, f64::MIN_POSITIVE, 1000.0)?, area)
+    } else {
+        within(c, p, "flow", 0.0, f64::MIN_POSITIVE, 1.0e9)?
+    };
+    let round = |x: f64, k: f64| (x * k).round() / k + 0.0;
+    if kind == "downpipe" {
+        if absent(p.get("gutter")) {
+            return Err(bad(c, "`gutter` (the water depth in the gutter, 50 to 100 mm) is required"));
+        }
+        if absent(p.get("length")) {
+            return Err(bad(c, "`length` (the downpipe's, mm) is required"));
+        }
+        let (gutter, length) = (within(c, p, "gutter", 0.0, 0.0, 10_000.0)?, within(c, p, "length", 0.0, 0.0, MAX_COORD)? / 1000.0);
+        let d = storm::downpipe_diameter(outlet, flow, gutter, length).map_err(|off| {
+            bad(
+                c,
+                match off {
+                    Off::Depth => "the water depth in the gutter must be 50 to 100 mm: the abacuses stop there",
+                    Off::Length => "a downpipe shorter than 0.3 m is off the abacuses",
+                    Off::Diameter => "more than 150 mm inside is off the abacuses of NBR 10844's Figure 3",
+                },
+            )
+        })?;
+        return Ok(
+            json!({"flow_lpm": round(flow, 100.0), "inside_mm": round(d.diameter, 10.0), "by_depth_mm": round(d.by_depth, 10.0), "by_length_mm": round(d.by_length, 10.0)}),
+        );
+    }
+    if absent(p.get("slope")) {
+        return Err(bad(c, "`slope` (a fraction, 0.005 at least) is required"));
+    }
+    let slope = within(c, p, "slope", 0.0, 0.0, 1.0)?;
+    if slope + 1e-9 < MIN_SLOPE {
+        return Err(bad(c, "`slope` must be 0.5 % (0.005) at least, NBR 10844"));
+    }
+    let need = storm::horizontal_diameter(flow, slope, N_PVC);
+    let inside = within(c, p, "inside", 0.0, 0.0, 10_000.0)?;
+    let carries = (inside > 0.0).then(|| storm::manning_flow(inside, slope, N_PVC));
+    Ok(json!({
+        "flow_lpm": round(flow, 100.0),
+        "inside_mm": round(need, 10.0),
+        "carries_lpm": carries.map(|q| round(q, 10.0)),
+        "ok": carries.map(|q| q + 1e-9 >= flow),
+    }))
+}
+
 fn undo(s: &mut Session, p: &Value) -> R {
     s.step_back(false, steps("undo", p)?)
 }
@@ -3552,17 +4494,21 @@ fn beside(s: &Session, path: &str) -> PathBuf {
     }
 }
 
-/// The bytes of the DXF file `path`, or why it can't be brought in.
-fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
+/// The bytes of the DXF file `path` (a DWG's, read by the session's DWG reader, as the DXF it becomes) and notes on what a
+/// DWG's read left out, or why it can't be brought in.
+fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), String> {
     let full = beside(s, path);
     match ext(&full).as_str() {
         "dxf" => {}
         "dwg" => {
-            return Err(format!(
-                "{}: BIMCraft doesn't read DWG yet; save it as DXF (any version, ASCII) from the program that made it, \
-                 or convert it with a DWG to DXF converter, and bring that in",
-                full.display()
-            ));
+            let Some(read) = &s.dwg else {
+                return Err(format!(
+                    "{}: this BIMCraft has no DWG reader built in; save it as DXF (any version, ASCII) from the program that \
+                     made it, or convert it with a DWG to DXF converter, and bring that in",
+                    full.display()
+                ));
+            };
+            return read(&full).map_err(|e| format!("{}: {e}", full.display()));
         }
         other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
     }
@@ -3570,7 +4516,7 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
     if len > crate::dxf::MAX_BYTES as u64 {
         return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
     }
-    std::fs::read(&full).map_err(|e| format!("{}: {e}", full.display()))
+    std::fs::read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
 }
 
 /// The CAD import `id` names, by id or GUID.
@@ -3642,6 +4588,7 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         (level, Some(plan.unwrap_or(level)))
     };
     let link = flag(c, p, "link")?;
+    let mut notes = Vec::new();
     let (name, cad, new) = match (string(c, p, "path")?, string(c, p, "cad")?) {
         (Some(_), Some(_)) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, a drawing the project holds; not both")),
         (None, None) => return Err(bad(c, "give `path`, a DXF file to bring in, or `cad`, the name of a drawing the project holds")),
@@ -3675,7 +4622,8 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
                     format!("the project holds {} CAD drawings already; delete the imports of one first", crate::cad::MAX_CADS),
                 ));
             }
-            let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            let (bytes, read_notes) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+            notes = read_notes;
             let held: usize = m.cads.values().map(Cad::len).sum();
             if held + bytes.len() > crate::cad::MAX_HELD {
                 return Err(bad(
@@ -3752,6 +4700,9 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,
         "extents": extents, "far": far, "left_out": left_out,
     });
+    if !notes.is_empty() {
+        reply["notes"] = json!(notes);
+    }
     if far > 0 {
         reply["warning"] = json!(format!(
             "{far} of its entities lie far from the rest of the drawing: they're drawn where they are, and left out of its extents. \
@@ -3822,7 +4773,7 @@ fn reload_cad(s: &mut Session, p: &Value) -> R {
         .path()
         .map(str::to_string)
         .ok_or_else(|| bad(c, format!("CAD drawing `{name}` isn't linked; bring it in again with `import_cad` and `link`")))?;
-    let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+    let (bytes, _) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
     if cad.same_bytes(&bytes) {
         return Ok(json!({"cad": name, "changed": false}));
     }
@@ -3838,7 +4789,7 @@ fn relink_cads(s: &mut Session) -> Vec<Value> {
     let linked: Vec<(String, String)> = s.model.cads.iter().filter_map(|(n, cad)| Some((n.clone(), cad.path()?.to_string()))).collect();
     let mut failed = Vec::new();
     for (name, path) in linked {
-        let read = read_dxf_file(s, &path).and_then(|bytes| {
+        let read = read_dxf_file(s, &path).and_then(|(bytes, _)| {
             let held = s.model.cads.get(&name);
             if held.is_some_and(|h| h.same_bytes(&bytes)) {
                 return Ok(None);
@@ -3909,6 +4860,187 @@ fn room_separator(s: &mut Session, p: &Value) -> R {
         })
         .collect();
     Ok(json!({"ids": ids}))
+}
+
+fn rebar_bars(s: &mut Session, p: &Value) -> R {
+    let c = "rebar";
+    let mut path = points3(c, p, "points")?;
+    if path.len() < 2 {
+        return Err(bad(c, "`points` needs at least 2 points"));
+    }
+    if flag(c, p, "closed")?
+        && let Some(&first) = path.first()
+    {
+        path.push(first);
+    }
+    if rebar::length(&path) <= TOL {
+        return Err(bad(c, "the bar is too short: its points are all in one place"));
+    }
+    let diameter = num(c, p, "diameter")?.ok_or_else(|| bad(c, "`diameter` in mm is required"))?;
+    let (thin, thick) = rebar::DIAMETERS;
+    if !(thin..=thick).contains(&diameter) {
+        return Err(bad(c, format!("`diameter` {diameter} mm isn't between {thin} and {thick} mm")));
+    }
+    let grade = string(c, p, "grade")?.unwrap_or_else(|| rebar::GRADE.into());
+    if grade.trim().is_empty() {
+        return Err(bad(c, "`grade` can't be blank"));
+    }
+    let layer = string(c, p, "layer")?.unwrap_or_default();
+    let count = count_opt(c, p, "count", 1)?;
+    if !(1..=rebar::MAX_BARS).contains(&count) || count.saturating_mul(path.len()) > MAX_POINTS {
+        return Err(bad(c, format!("`count` is 1 to {} bars, and the bars' points together up to {MAX_POINTS}", rebar::MAX_BARS)));
+    }
+    let step = match p.get("step") {
+        Some(v) if !v.is_null() => point3(v).ok_or_else(|| bad(c, format!("`step` must be [dx, dy, dz] in mm, got {v}")))?,
+        _ if count > 1 => return Err(bad(c, "`step` [dx, dy, dz] is required for more than one bar")),
+        _ => [0.0; 3],
+    };
+    let m = &s.model;
+    let host = match id_opt(c, p, "host")? {
+        Some(h) => Some(m.elements.id(h).ok_or_else(|| bad(c, format!("no element {h}")))?),
+        None => None,
+    };
+    // Its host's level, unless told another.
+    let hosted_at = host.and_then(|h| m.elements.get(h)).and_then(|e| m.level_of(e));
+    let level = match hosted_at {
+        Some(l) if absent(p.get("level")) => l,
+        _ => level_param(c, m, p, "level")?,
+    };
+    let host = host.map(|h| m.guid(h));
+    let m = s.model_mut();
+    let ids: Vec<Id> = (0..count)
+        .map(|k| {
+            let k = k as f64;
+            let path = path.iter().map(|q| [q[0] + k * step[0], q[1] + k * step[1], q[2] + k * step[2]]).collect();
+            m.insert(Element::Rebar(Rebar { level, host, path, diameter, grade: grade.clone(), layer: layer.clone() }))
+        })
+        .collect();
+    Ok(json!({"ids": ids}))
+}
+
+fn reinforce_host(s: &mut Session, p: &Value) -> R {
+    let c = "reinforce";
+    let m = &s.model;
+    // A preset's parameters, which what is given with it replaces.
+    let preset = string(c, p, "preset")?;
+    let merged;
+    let (p, kind) = match &preset {
+        None => (p, None),
+        Some(name) => {
+            let pre = m.reinforcement.get(name).ok_or_else(|| bad(c, format!("there's no reinforcement preset `{name}`")))?;
+            let mut all = pre.params.clone();
+            all.extend(p.as_object().into_iter().flatten().filter(|(k, _)| k.as_str() != "preset").map(|(k, v)| (k.clone(), v.clone())));
+            merged = Value::Object(all);
+            (&merged, Some((name, pre.kind.as_str())))
+        }
+    };
+    // One `host`, or a list of `hosts`, each armed alike; each once.
+    let hosts: Vec<Id> = match (p.get("host"), p.get("hosts")) {
+        (Some(h), Some(l)) if !absent(Some(h)) && !absent(Some(l)) => return Err(bad(c, "give `host` or `hosts`, not both")),
+        (v, Some(Value::Array(a))) if absent(v) && (1..=rebar::MAX_HOSTS).contains(&a.len()) => {
+            let mut seen = BTreeSet::new();
+            a.iter().map(|v| element_id(c, m, v)).collect::<Result<Vec<Id>, String>>()?.into_iter().filter(|id| seen.insert(*id)).collect()
+        }
+        (v, Some(l)) if absent(v) && !absent(Some(l)) => {
+            return Err(bad(c, format!("`hosts` is a list of 1 to {} elements", rebar::MAX_HOSTS)));
+        }
+        _ => {
+            let host = id_opt(c, p, "host")?.ok_or_else(|| bad(c, "`host` (an element) or `hosts` (a list of them) is required"))?;
+            vec![m.elements.id(host).ok_or_else(|| bad(c, format!("no element {host}")))?]
+        }
+    };
+    let several = hosts.len() > 1;
+    let mut made = Vec::new();
+    let mut total = 0;
+    for id in &hosts {
+        let element = m.elements.get(*id).ok_or_else(|| bad(c, format!("no element {id}")))?;
+        let level = m.level_of(element).ok_or_else(|| bad(c, "that element has no level"))?;
+        if let Some((name, kind)) = kind.filter(|(_, k)| crate::reinforce::kind_of(element) != Some(*k)) {
+            return Err(bad(c, format!("preset `{name}` is for a {kind}, and {id} is a {}", element.category())));
+        }
+        let bars = crate::reinforce::bars(m, element, p)
+            .map_err(|e| if several { format!("{e} (for the {} {id})", element.category()) } else { e })?;
+        total += bars.len();
+        if total > rebar::MAX_BARS_ALL {
+            return Err(bad(
+                c,
+                format!(
+                    "that is more than the {} bars a command makes: arm fewer elements at once, or widen a spacing",
+                    rebar::MAX_BARS_ALL
+                ),
+            ));
+        }
+        made.push((*id, m.guid(*id), level, bars));
+    }
+    let hosted: BTreeSet<Guid> = made.iter().map(|(_, g, _, _)| *g).collect();
+    // The bars each made before, which this replaces; a bar with no layer was drawn by hand.
+    let old: Vec<Id> = m
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::Rebar(r) if r.host.is_some_and(|h| hosted.contains(&h)) && !r.layer.is_empty()))
+        .map(|(i, _)| *i)
+        .collect();
+    let weight: f64 = made.iter().flat_map(|(_, _, _, bars)| bars).map(|b| rebar::weight_kg(b.diameter, rebar::length(&b.path))).sum();
+    let m = s.model_mut();
+    for i in &old {
+        m.elements.remove(*i);
+    }
+    let mut ids: Vec<Id> = Vec::new();
+    for (_, guid, level, bars) in made {
+        for b in bars {
+            ids.push(m.insert(Element::Rebar(Rebar {
+                level,
+                host: Some(guid),
+                path: b.path,
+                diameter: b.diameter,
+                grade: b.grade,
+                layer: b.layer.into(),
+            })));
+        }
+    }
+    Ok(json!({"ids": ids, "count": ids.len(), "hosts": hosts.len(), "removed": old.len(), "weight_kg": (weight * 1000.0).round() / 1000.0}))
+}
+
+fn reinforcement_preset(s: &mut Session, p: &Value) -> R {
+    let c = "reinforcement_preset";
+    only(c, p, &["name", "kind", "params", "rename", "delete"])?;
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"presets": s.model.reinforcement}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.reinforcement.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no reinforcement preset `{name}`")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let was = m.reinforcement.get(&name).cloned();
+    let kind = string(c, p, "kind")?
+        .or_else(|| was.as_ref().map(|w| w.kind.clone()))
+        .ok_or_else(|| bad(c, format!("`kind` ({}) is required for a new preset", crate::reinforce::KINDS.join(", "))))?;
+    let params = match p.get("params") {
+        Some(Value::Object(o)) => o.clone(),
+        None | Some(Value::Null) => was.map(|w| w.params).ok_or_else(|| bad(c, "`params` {…} is required for a new preset"))?,
+        Some(v) => return Err(bad(c, format!("`params` must be an object of reinforce's parameters, got {v}"))),
+    };
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.reinforcement.contains_key(&to) {
+                return Err(bad(c, format!("there's already a reinforcement preset `{to}`")));
+            }
+            m.reinforcement.remove(&name);
+            rename_entry(m, &LibKind::ReinforcementPreset, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    let preset = crate::reinforce::Preset { kind, params };
+    preset.check(&name).map_err(|e| bad(c, e))?;
+    if !m.reinforcement.contains_key(&name) && m.reinforcement.len() >= crate::reinforce::MAX_PRESETS {
+        return Err(bad(c, format!("the project holds up to {} presets", crate::reinforce::MAX_PRESETS)));
+    }
+    m.reinforcement.insert(name.clone(), preset.clone());
+    Ok(json!({"name": name, "preset": preset}))
 }
 
 fn wall(s: &mut Session, p: &Value) -> R {
@@ -4003,10 +5135,13 @@ fn flip(s: &mut Session, p: &Value) -> R {
     for e in m.elements.values_mut() {
         if let Element::Dimension(d) = e {
             for r in &mut d.refs {
+                // A flipped wall runs the other way, and across it in to out is out to in: an end swaps too.
                 if lengths.contains_key(&r.id) {
                     r.face = r.face.flipped();
+                    r.point = r.point.map(End::other);
                 } else if hosts.get(&r.id).is_some_and(|h| lengths.contains_key(h)) {
                     r.face = r.face.mirrored();
+                    r.point = r.point.map(End::other);
                 }
             }
         }
@@ -4467,6 +5602,17 @@ fn room(s: &mut Session, p: &Value) -> R {
         })),
     };
     let r = Room { params: Default::default(), level, point, name, number: number.clone() };
+    if let Some(wall) = m.wall_holding(&r, m.room_area) {
+        return Err(bad(
+            c,
+            format!(
+                "[{}, {}] lies inside wall {}; place a room in the space between walls, not in a wall",
+                point.0,
+                point.1,
+                m.shown(wall)
+            ),
+        ));
+    }
     let region = m.room_region(&r).ok_or_else(|| {
         bad(
             c,
@@ -4501,14 +5647,75 @@ fn reference_near(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool
         .map(|(r, _)| r)
 }
 
-/// The round column on `level` whose edge passes nearest `p`, within 100 mm.
-fn arc_near(m: &Model, level: impl Key, p: P2) -> Option<Reference> {
-    let level = m.guid(level);
+/// Of the ends of the lines a plan of `level` (`view`, when not the level's own) shows (walls' centre lines and faces,
+/// doors' and windows' jambs, grids, its detail lines), the nearest `p`, within 100 mm.
+fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let cut = |w: Option<&Wall>| w.is_some_and(|w| m.cut_by(w, level));
+    let plan = view.unwrap_or(level);
+    m.elements
+        .iter()
+        .filter(|(_, e)| match e {
+            Element::Wall(w) => cut(Some(w)),
+            Element::Door(o) | Element::Window(o) => cut(m.wall(o.host)),
+            Element::Grid(_) => true,
+            Element::DetailLine(l) => m.same(l.view, plan),
+            _ => false,
+        })
+        .filter_map(|(&id, _)| m.endpoint_at(id, p))
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// Of the arcs a plan of `level` (`view`, when not the level's own) shows (its curved walls' centre lines and faces, its
+/// detail lines that are arcs), the one passing nearest `p`, within 100 mm.
+fn sweep_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
     m.elements
         .with_guids()
-        .filter(|(_, _, e)| e.column().is_some_and(|col| col.level == level))
-        .filter_map(|(_, id, _)| {
-            let r = Reference { id, face: Face::Centre };
+        .flat_map(|(_, id, e)| {
+            match e {
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
+            let (c, radius, a0, sweep) = m.reference_sweep(&r).ok()?;
+            // How far round from its start `p` lies, the way it sweeps: within it, the distance off it; else from its ends.
+            let t = (sweep.signum() * ((p.1 - c.1).atan2(p.0 - c.0) - a0)).rem_euclid(std::f64::consts::TAU);
+            let gap = if t <= sweep.abs() {
+                (p.dist(c) - radius).abs()
+            } else {
+                let end = |a: f64| c + P2(a.cos(), a.sin()) * radius;
+                p.dist(end(a0)).min(p.dist(end(a0 + sweep)))
+            };
+            Some((r, gap))
+        })
+        .filter(|(_, d)| *d <= 100.0)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// Of what a plan of `level` (`view`, when not the level's own) shows round (its round columns, its curved walls' centre
+/// lines and faces, its detail lines that are circles or arcs), the one whose edge passes nearest `p`, within 100 mm.
+fn arc_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+    let plan = view.unwrap_or(level);
+    m.elements
+        .with_guids()
+        .flat_map(|(_, id, e)| {
+            match e {
+                e if e.column().is_some_and(|col| col.level == level) => vec![Face::Centre],
+                Element::Wall(w) if w.arc != 0.0 && m.cut_by(w, level) => vec![Face::Centre, Face::Left, Face::Right],
+                Element::DetailLine(l) if m.same(l.view, plan) => vec![Face::Centre],
+                _ => Vec::new(),
+            }
+            .into_iter()
+            .map(move |face| Reference::line(id, face))
+        })
+        .filter_map(|r| {
             let (c, radius) = m.reference_arc(&r).ok()?;
             Some((r, (p.dist(c) - radius).abs()))
         })
@@ -4524,7 +5731,12 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let at = point_req(c, p, "at")?;
     let kind = match string(c, p, "kind")? {
         None => DimKind::Aligned,
-        Some(k) => serde_json::from_value(json!(k)).map_err(|_| bad(c, format!("`kind` is aligned, angular or radial, not `{k}`")))?,
+        Some(k) => serde_json::from_value(json!(k))
+            .map_err(|_| bad(c, format!("`kind` is aligned, linear, angular, radial, diameter or arc_length, not `{k}`")))?,
+    };
+    let mut orient: Option<Orient> = match string(c, p, "orient")? {
+        None => None,
+        Some(o) => Some(serde_json::from_value(json!(o)).map_err(|_| bad(c, format!("`orient` is horizontal or vertical, not `{o}`")))?),
     };
     let given = p.get("refs").and_then(Value::as_array).ok_or_else(|| bad(c, "`refs` [ref, …] is required"))?;
     if given.len() > MAX_POINTS {
@@ -4533,8 +5745,20 @@ fn dimension(s: &mut Session, p: &Value) -> R {
     let mut refs: Vec<Reference> = Vec::new();
     for v in given {
         let near = |q: P2, what: &str| bad(c, format!("no {what} at [{}, {}] on {}", q.0, q.1, level_name(m, level)));
+        let endpoint = v.get("endpoint").filter(|_| v.as_object().is_some_and(|o| o.len() == 1));
+        if let Some(e) = endpoint {
+            let q = point(e).ok_or_else(|| bad(c, format!("`endpoint` is a point [x, y], not {e}")))?;
+            refs.push(
+                endpoint_near(m, level, view, q)
+                    .ok_or_else(|| near(q, "end of a wall, a wall face, a door, a window, a grid or a detail line"))?,
+            );
+            continue;
+        }
         let r = match point(v) {
-            Some(q) if kind == DimKind::Radial => arc_near(m, level, q).ok_or_else(|| near(q, "round column's edge"))?,
+            Some(q) if matches!(kind, DimKind::Radial | DimKind::Diameter) => {
+                arc_near(m, level, view, q).ok_or_else(|| near(q, "round column's, curved wall's, circle's or arc's edge"))?
+            }
+            Some(q) if kind == DimKind::ArcLength => sweep_near(m, level, view, q).ok_or_else(|| near(q, "curved wall or arc"))?,
             Some(q) => {
                 // After the first: one parallel to it, or for an angle, one across it.
                 let first = refs.first().and_then(|r| m.reference_line(r).ok());
@@ -4547,7 +5771,35 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         };
         refs.push(r);
     }
-    let d = Dimension { level, view, kind, refs, at };
+    if kind == DimKind::Linear && orient.is_none() {
+        // East or west of everything it measures, vertical; else horizontal.
+        let xs: Vec<f64> = refs.iter().filter_map(|r| m.reference_geometry(r).ok()).flat_map(|(a, b)| [a.0, b.0]).collect();
+        let beside = xs.iter().all(|&x| x < at.0) || xs.iter().all(|&x| x > at.0);
+        orient = Some(if beside && !xs.is_empty() { Orient::Vertical } else { Orient::Horizontal });
+    }
+    let type_name = match name_param(c, p, "type")? {
+        Some(t) => t,
+        None => crate::dims::default_type(&m.dimension_types, kind).cloned().unwrap_or_default(),
+    };
+    let text = |key: &str| string(c, p, key).map(Option::unwrap_or_default);
+    let d = Dimension {
+        level,
+        view,
+        kind,
+        orient,
+        refs,
+        at,
+        type_name,
+        prefix: text("prefix")?,
+        suffix: text("suffix")?,
+        above: text("above")?,
+        below: text("below")?,
+        replace: text("replace")?,
+        equality: flag(c, p, "equality")?,
+        texts: Vec::new(),
+        equal: false,
+        locked: Vec::new(),
+    };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
     Ok(json!({"id": id, "values": values}))
@@ -4604,20 +5856,280 @@ fn tag(s: &mut Session, p: &Value) -> R {
 
 fn text_note(s: &mut Session, p: &Value) -> R {
     let c = "text";
+    if p.get("size").is_some() {
+        return Err(bad(c, "a note's size is its text type's: give `type` (`text_type` lists them, and makes one of a size)"));
+    }
+    only(c, p, &["text", "at", "view", "type", "angle", "leader", "override_format", "runs"])?;
     let m = &s.model;
-    let text = string(c, p, "text")?.ok_or_else(|| bad(c, "`text` is required"))?;
+    let text = note_text(c, p)?.ok_or_else(|| bad(c, "`text` is required"))?;
     let at = point_req(c, p, "at")?;
     let view = view_param(c, m, p, true)?;
+    let type_name = match name_param(c, p, "type")? {
+        Some(n) => n,
+        None => crate::text::default_type(&m.text_types).cloned().ok_or_else(|| bad(c, "the project has no text type; make one first"))?,
+    };
+    let runs = match p.get("runs") {
+        v if absent(v) => Vec::new(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("`runs`: {e}")))?,
+        None => Vec::new(),
+    };
     let n = Note {
         view: m.guid(view),
         at,
         text,
-        size: num(c, p, "size")?.unwrap_or(NOTE_SIZE),
+        type_name,
+        size: None,
         angle: num(c, p, "angle")?.unwrap_or(0.0),
         leader: point_opt(c, p, "leader")?,
+        override_format: flag(c, p, "override_format")?,
+        runs,
     };
     let id = s.model_mut().insert(Element::Text(n));
     Ok(json!({"id": id}))
+}
+
+/// A note's `text`: up to [`crate::text::MAX_NOTE`] characters.
+fn note_text(c: &str, p: &Value) -> Result<Option<String>, String> {
+    match p.get("text") {
+        v if absent(v) => Ok(None),
+        Some(Value::String(t)) if t.chars().count() <= crate::text::MAX_NOTE => Ok(Some(t.clone())),
+        Some(v) => Err(bad(c, format!("`text` must be text of at most {} characters, got {v}", crate::text::MAX_NOTE))),
+        None => Ok(None),
+    }
+}
+
+fn text_type(s: &mut Session, p: &Value) -> R {
+    let c = "text_type";
+    let keys = ["font", "size", "bold", "italic", "underline", "width_factor", "color", "border", "border_offset", "border_pen"];
+    only(c, p, &[&["name", "like", "rename", "delete"][..], &keys[..]].concat())?;
+    let Some(name) = name_param(c, p, "name")? else {
+        // What letters each type here: its font, or what stands in for it.
+        let drawn: serde_json::Map<String, Value> =
+            s.model.text_types.iter().map(|(n, t)| (n.clone(), json!(crate::text::resolve(&t.font, false, false).family()))).collect();
+        return Ok(json!({"types": s.model.text_types, "fonts": crate::text::families(), "drawn_with": drawn}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if m.text_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no text type `{name}`")));
+        }
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::Text(n) if n.type_name == name)) {
+            return Err(bad(c, format!("note {id} is of `{name}`; give it another type first")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let mut t = match (m.text_types.get(&name), name_param(c, p, "like")?) {
+        (Some(t), _) => t.clone(),
+        (None, Some(like)) => {
+            m.text_types.get(&like).cloned().ok_or_else(|| bad(c, format!("there's no text type `{like}` to start from")))?
+        }
+        (None, None) => crate::text::TextType::default(),
+    };
+    if let Some(f) = name_param(c, p, "font")? {
+        // A font the type has already stays, though this system hasn't it (a project from another).
+        if !f.trim().eq_ignore_ascii_case(t.font.trim()) {
+            t.font = crate::text::known(&f).ok_or_else(|| {
+                let all = crate::text::families();
+                let word = f.split_whitespace().next().unwrap_or_default().to_lowercase();
+                let like: Vec<&str> = all.iter().map(String::as_str).filter(|n| n.to_lowercase().contains(&word)).take(12).collect();
+                let some: Vec<&str> = if like.is_empty() { all.iter().map(String::as_str).take(12).collect() } else { like };
+                let n = all.len();
+                bad(
+                    c,
+                    format!(
+                        "this system has no font `{f}` (it has {n}, such as: {}); `text_type` without `name` lists them",
+                        some.join(", ")
+                    ),
+                )
+            })?;
+        }
+    }
+    for (key, slot) in [("size", &mut t.size), ("width_factor", &mut t.width_factor), ("border_offset", &mut t.border_offset)] {
+        if let Some(x) = num(c, p, key)? {
+            *slot = x;
+        }
+    }
+    for (key, slot) in [("bold", &mut t.bold), ("italic", &mut t.italic), ("underline", &mut t.underline), ("border", &mut t.border)] {
+        if !absent(p.get(key)) {
+            *slot = flag(c, p, key)?;
+        }
+    }
+    if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
+        t.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+    }
+    if let Some(v) = p.get("border_pen").filter(|v| !v.is_null()) {
+        t.border_pen = serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("`border_pen`: {e}")))?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.text_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a text type `{to}`")));
+            }
+            m.text_types.remove(&name);
+            rename_entry(m, &LibKind::TextType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name).map_err(|e| bad(c, e))?;
+    if m.text_types.get(&name) != Some(&t) {
+        m.text_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
+}
+
+fn dimension_constraint(s: &mut Session, p: &Value) -> R {
+    use crate::model::Lock;
+    let c = "dimension_constraint";
+    only(c, p, &["id", "equal", "locked"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let values = s.model.dimension_values(&d);
+    if !absent(p.get("equal")) {
+        d.equal = flag(c, p, "equal")?;
+        // As Revit's EQ shows its segments as EQ.
+        d.equality = d.equal;
+    }
+    if let Some(v) = p.get("locked").filter(|v| !v.is_null()) {
+        let list = v.as_array().ok_or_else(|| bad(c, format!("`locked` is a list of segments, not {v}")))?;
+        let mut locked = Vec::new();
+        for x in list {
+            let i = x
+                .as_u64()
+                .map(|i| i as usize)
+                .filter(|&i| i < values.len())
+                .ok_or_else(|| bad(c, format!("dimension {id} has segments 0 to {}, not {x}", values.len().saturating_sub(1))))?;
+            // A segment locked already keeps its length; a new one, the length it has now.
+            let length = d.locked.iter().find(|l| l.segment == i).map_or(values.get(i).copied().unwrap_or_default(), |l| l.length);
+            if !locked.iter().any(|l: &Lock| l.segment == i) {
+                locked.push(Lock { segment: i, length });
+            }
+        }
+        locked.sort_by_key(|l| l.segment);
+        d.locked = locked;
+    }
+    s.model_mut().elements.insert(id, Element::Dimension(d.clone()));
+    Ok(json!({"id": id, "equal": d.equal, "locked": d.locked.iter().map(|l| l.segment).collect::<Vec<_>>()}))
+}
+
+fn dimension_text(s: &mut Session, p: &Value) -> R {
+    use crate::model::SegmentText;
+    let c = "dimension_text";
+    only(c, p, &["id", "segment", "prefix", "suffix", "above", "below", "replace"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let mut d = d.clone();
+    let count = s.model.dimension_labels(&d).len();
+    let given = |key: &str| string(c, p, key);
+    match num(c, p, "segment")? {
+        None => {
+            for (key, slot) in [
+                ("prefix", &mut d.prefix),
+                ("suffix", &mut d.suffix),
+                ("above", &mut d.above),
+                ("below", &mut d.below),
+                ("replace", &mut d.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+        }
+        Some(i) if i.fract() == 0.0 && i >= 0.0 && (i as usize) < count => {
+            let i = i as usize;
+            let mut st = d.texts.iter().find(|t| t.segment == i).cloned().unwrap_or(SegmentText { segment: i, ..SegmentText::default() });
+            for (key, slot) in [
+                ("prefix", &mut st.prefix),
+                ("suffix", &mut st.suffix),
+                ("above", &mut st.above),
+                ("below", &mut st.below),
+                ("replace", &mut st.replace),
+            ] {
+                if let Some(t) = given(key)? {
+                    *slot = t;
+                }
+            }
+            d.texts.retain(|t| t.segment != i);
+            if !st.is_empty() {
+                d.texts.push(st);
+                d.texts.sort_by_key(|t| t.segment);
+            }
+        }
+        Some(i) => return Err(bad(c, format!("dimension {id} has segments 0 to {}, not {i}", count.saturating_sub(1)))),
+    }
+    let labels = s.model.dimension_labels(&d);
+    s.model_mut().elements.insert(id, Element::Dimension(d));
+    Ok(json!({"id": id, "labels": labels}))
+}
+
+fn dimension_type(s: &mut Session, p: &Value) -> R {
+    use crate::dims::DimensionType;
+    let c = "dimension_type";
+    let Some(name) = name_param(c, p, "name")? else {
+        return Ok(json!({"types": s.model.dimension_types, "fonts": crate::text::families()}));
+    };
+    let m = s.model_mut();
+    if flag(c, p, "delete")? {
+        if let Some((id, _)) = m.elements.iter().find(|(_, e)| matches!(e, Element::Dimension(d) if d.type_name == name)) {
+            return Err(bad(c, format!("dimension {id} is of `{name}`; give it another type first")));
+        }
+        if m.dimension_types.remove(&name).is_none() {
+            return Err(bad(c, format!("there's no dimension type `{name}`")));
+        }
+        return Ok(json!({"deleted": name}));
+    }
+    let t = match (m.dimension_types.get(&name), name_param(c, p, "like")?) {
+        (Some(t), _) => t.clone(),
+        (None, Some(like)) => {
+            m.dimension_types.get(&like).cloned().ok_or_else(|| bad(c, format!("there's no dimension type `{like}` to start from")))?
+        }
+        (None, None) => DimensionType::default(),
+    };
+    // What it is, with the values given over it, read as a file reads one: a key it hasn't is an error.
+    let mut v = serde_json::to_value(&t).map_err(|e| bad(c, e.to_string()))?;
+    let mut font = None;
+    if let Some(o) = v.as_object_mut() {
+        for (key, value) in p.as_object().into_iter().flatten() {
+            match key.as_str() {
+                "name" | "like" | "rename" | "delete" => {}
+                "font" => font = name_param(c, p, "font")?,
+                "color" if !value.is_null() => {
+                    let rgb =
+                        colour(value).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {value}")))?;
+                    o.insert(key.clone(), json!(rgb));
+                }
+                _ => {
+                    o.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+    let mut t: DimensionType = serde_json::from_value(v).map_err(|e| bad(c, e.to_string()))?;
+    if let Some(f) = font.filter(|f| !f.trim().eq_ignore_ascii_case(t.font.trim())) {
+        t.font = crate::text::known(&f)
+            .ok_or_else(|| bad(c, format!("this system has no font `{f}`; `dimension_type` without `name` lists them")))?;
+    }
+    let name = match name_param(c, p, "rename")? {
+        Some(to) if to != name => {
+            if m.dimension_types.contains_key(&to) {
+                return Err(bad(c, format!("there's already a dimension type `{to}`")));
+            }
+            m.dimension_types.remove(&name);
+            rename_entry(m, &LibKind::DimensionType, &name, &to);
+            to
+        }
+        _ => name,
+    };
+    t.check(&name).map_err(|e| bad(c, e))?;
+    if m.dimension_types.get(&name) != Some(&t) {
+        m.dimension_types.insert(name.clone(), t.clone());
+    }
+    Ok(json!({"name": name, "type": t}))
 }
 
 fn spot(s: &mut Session, p: &Value) -> R {
@@ -5761,6 +7273,13 @@ fn material(s: &mut Session, p: &Value) -> R {
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         mat.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
     }
+    if let Some(v) = p.get("transparency").filter(|v| !v.is_null()) {
+        mat.transparency = v
+            .as_u64()
+            .filter(|t| *t <= 100)
+            .and_then(|t| u8::try_from(t).ok())
+            .ok_or_else(|| bad(c, format!("`transparency` is a whole percent, 0 to 100, not {v}")))?;
+    }
     // A pattern drawn in code by its name, or one of the project's fill patterns.
     for (key, slot, fill) in [("cut", &mut mat.cut, &mut mat.cut_pattern), ("surface", &mut mat.surface, &mut mat.surface_pattern)] {
         if let Some(v) = p.get(key).filter(|v| !v.is_null()) {
@@ -6056,7 +7575,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
-        let mut family: Map<String, Value> = ["category", "parameters", "types", "forms", "symbols"]
+        let mut family: Map<String, Value> = ["category", "parameters", "types", "forms", "symbols", "operation"]
             .into_iter()
             .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
             .collect();
@@ -6119,6 +7638,9 @@ fn family(s: &mut Session, p: &Value) -> R {
         let mut symbols: Vec<crate::family::Symbol> = serde_json::from_value(v.clone()).map_err(|e| field("symbols", e))?;
         crate::library::keep_parts(&mut f.symbols, &mut symbols);
         f.symbols = symbols;
+    }
+    if let Some(op) = string(c, &p, "operation")? {
+        f.operation = operation(c, &op)?;
     }
     if let Some(v) = p.get("types").filter(|v| !v.is_null()) {
         let mut types = serde_json::to_value(&f.types).map_err(|e| bad(c, e))?;
@@ -6340,10 +7862,15 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
         "door" | "window" => {
             let map = if cat == "door" { &mut m.types.door } else { &mut m.types.window };
             let old = map.get(&name).cloned();
+            let op = match string(c, p, "operation")? {
+                Some(name) => operation(c, &name)?,
+                None => old.as_ref().and_then(|t| t.operation),
+            };
             let t = OpeningType {
                 width: width.or(old.as_ref().map(|t| t.width)).ok_or_else(|| need("width"))?,
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 sill: sill.or(old.as_ref().map(|t| t.sill)).unwrap_or(if cat == "window" { 900.0 } else { 0.0 }),
+                operation: op,
             };
             map.insert(name.clone(), t);
             json!(t)
@@ -6495,6 +8022,13 @@ fn modify(s: &mut Session, p: &Value) -> R {
             }
         }
         let mut e2 = serde_json::from_value::<Element>(v).map_err(|e| bad(c, format!("element {id}: {e}")))?;
+        // A note's new text keeps its runs on what didn't change, unless it is given runs of its own.
+        if let (Element::Text(old), Element::Text(n)) = (e, &mut e2)
+            && old.text != n.text
+            && !fields.contains_key("runs")
+        {
+            n.runs = crate::text::remap(&old.text, &n.text, &old.runs);
+        }
         graphics::check_followed(m, e, &e2).map_err(|err| bad(c, format!("element {id}: {err}")))?;
         // A wall put on another of its lines stays where it is: its line moves across it instead.
         if let (Element::Wall(old), Element::Wall(w)) = (e, &mut e2)
@@ -6692,6 +8226,12 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
         Element::Wall(w) => (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) },
         Element::Grid(g) => (g.start, g.end) = (f(g.start), f(g.end)),
         Element::RoomSeparator(rs) => (rs.start, rs.end) = (f(rs.start), f(rs.end)),
+        Element::Rebar(rb) => {
+            for q in &mut rb.path {
+                let moved = f(P2(q[0], q[1]));
+                (q[0], q[1]) = (moved.0, moved.1);
+            }
+        }
         Element::Floor(fl) => {
             fl.boundary.iter_mut().chain(fl.openings.iter_mut().flatten()).for_each(|q| *q = f(*q));
             // A mirror turns the outline clockwise; floors keep theirs counter-clockwise.
@@ -6897,7 +8437,7 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         let turned = |id: &Guid| moving_guids.contains(id) || hosts.get(id).is_some_and(|h| moving_guids.contains(h));
         for e in m.elements.values_mut() {
             if let Element::Dimension(d) = e {
-                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| r.face = r.face.mirrored());
+                d.refs.iter_mut().filter(|r| turned(&r.id)).for_each(|r| *r = r.mirrored(hosts.contains_key(&r.id)));
             }
         }
     }
@@ -6996,9 +8536,10 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
             Element::Dimension(d) => {
                 for r in &mut d.refs {
                     if let Some(&to) = hosts.get(&r.id) {
+                        let opening = matches!(m.elements.get(r.id), Some(Element::Door(_) | Element::Window(_)));
                         r.id = to;
                         if mo.mirror {
-                            r.face = r.face.mirrored();
+                            *r = r.mirrored(opening);
                         }
                     }
                 }
@@ -7014,6 +8555,39 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
         made.push(id);
     }
     Ok(json!({"ids": made}))
+}
+
+fn align_element(s: &mut Session, p: &Value) -> R {
+    let c = "align";
+    let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id` is required"))?;
+    let line = |name| -> Result<Line, String> {
+        match points(c, p, name)?.as_slice() {
+            [a, b] => Ok((*a, *b)),
+            _ => Err(bad(c, format!("`{name}` must contain two points"))),
+        }
+    };
+    let placement = crate::align::Placement::new(line("reference")?, line("line")?)?;
+    let id = s.model.elements.id(id).ok_or_else(|| bad(c, format!("no element {id}")))?;
+    if crate::align::lines(&s.model, id).is_empty() {
+        return Err(bad(c, format!("element {id} has no straight alignment line in plan")));
+    }
+    if s.model.elements.get(id).and_then(|e| s.model.run_geom(e)).is_some_and(|g| g.vertical()) && placement.angle.abs() > 1e-9 {
+        return Err(bad(c, "an upright run has no plan rotation; choose a parallel reference"));
+    }
+    if let Some(Element::Door(o) | Element::Window(o)) = s.model.elements.get(id)
+        && let Some(w) = s.model.wall(o.host)
+        && (placement.angle.abs() > 1e-9 || placement.by.cross((w.end - w.start).unit()).abs() > TOL)
+    {
+        return Err(bad(c, "a door or window can only slide along its host wall; align its jambs, or align the wall"));
+    }
+    let mo = Motion { map: &|q| placement.map(q), slide: (placement.angle.abs() <= 1e-9).then_some(placement.by), mirror: false };
+    relocate(c, s, &[id], &mo, None)?;
+    Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by}))
+}
+
+/// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.
+pub(crate) fn move_by(s: &mut Session, id: Id, by: P2) -> Result<(), String> {
+    move_elements(s, &json!({"ids": [id], "by": [by.0, by.1]})).map(|_| ())
 }
 
 fn move_elements(s: &mut Session, p: &Value) -> R {
@@ -7540,6 +9114,32 @@ fn delete_type(s: &mut Session, p: &Value) -> R {
     Ok(json!({"deleted": {"kind": label, "name": name}}))
 }
 
+fn rename_type(s: &mut Session, p: &Value) -> R {
+    let c = "rename_type";
+    only(c, p, &["category", "family", "type", "name"])?;
+    let to = name_param(c, p, "name")?.ok_or_else(|| bad(c, "`name` is required: the type's new name"))?;
+    let (kind, from) = entry_of(c, &s.model, p)?;
+    let label = kind.label();
+    // A family's type is `family: type` in the library.
+    let (to_entry, to) = match (&kind, from.split_once(": ")) {
+        (LibKind::FamilyType, Some((f, _))) => (format!("{f}: {to}"), to),
+        _ => (to.clone(), to),
+    };
+    if to_entry == from {
+        return Ok(json!({"renamed": {"kind": label, "from": from, "to": to}}));
+    }
+    let m = s.model_mut();
+    if m.library_names().iter().any(|(k, n)| *k == kind && *n == to_entry) {
+        return Err(bad(c, format!("there's already a {label} `{to}`")));
+    }
+    if !m.move_entry(&kind, &from, &to_entry) {
+        return Err(bad(c, format!("there is no {label} `{from}`")));
+    }
+    rename_entry(m, &kind, &from, &to_entry);
+    let shown = |n: &str| n.split_once(": ").filter(|_| kind == LibKind::FamilyType).map_or(n, |(_, t)| t).to_string();
+    Ok(json!({"renamed": {"kind": label, "from": shown(&from), "to": to}}))
+}
+
 /// How many passes Purge Unused makes at most: what a pass takes out may leave more unused (a family's material), a few deep.
 const PURGE_PASSES: usize = 16;
 
@@ -7597,6 +9197,7 @@ fn delete(s: &mut Session, p: &Value) -> R {
                     && match e {
                         Element::Door(o) | Element::Window(o) => gone.contains(&o.host),
                         Element::Railing(r) => r.host.is_some_and(|h| gone.contains(&h)),
+                        Element::Rebar(rb) => rb.host.is_some_and(|h| gone.contains(&h)),
                         // A plan view goes with its level and its parent; what is annotated in a view goes with it.
                         Element::PlanView(v) => gone.contains(&v.level) || v.parent.is_some_and(|p| gone.contains(&p)),
                         Element::Tag(t) => gone.contains(&t.host) || t.view.is_some_and(|v| gone.contains(&v)),
@@ -7670,6 +9271,46 @@ fn delete(s: &mut Session, p: &Value) -> R {
 
 // ---------- reading ----------
 
+fn standard(s: &mut Session, p: &Value) -> R {
+    let c = "standard";
+    if let Some(code) = string(c, p, "set")? {
+        let std = crate::standards::TechnicalStandard::from_code(&code)
+            .ok_or_else(|| bad(c, format!("`set` is nbr, iso, ansi, eu or jis, not `{code}`")))?;
+        let flag = |key: &str, default: bool| -> Result<bool, String> {
+            match p.get(key) {
+                None | Some(Value::Null) => Ok(default),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(v) => Err(bad(c, format!("`{key}` is true or false, not {v}"))),
+            }
+        };
+        let adapt_all = flag("adapt_all", true)?;
+        let (lw, os, un) =
+            (flag("adapt_line_weights", adapt_all)?, flag("adapt_object_styles", adapt_all)?, flag("adapt_units", adapt_all)?);
+        s.model_mut().apply_standard(std, lw, os, un);
+    }
+    let m = &s.model;
+    let std = m.standard();
+    Ok(json!({
+        "standard": std.code(),
+        "name": std.name(),
+        "short_name": std.short_name(),
+        "region": std.region(),
+        "governing_body": std.governing_body(),
+        "references": std.reference_standards(),
+        "projection": std.projection_method().name(),
+        "default_units": std.default_units().name(),
+        "default_sheet_size": std.default_sheet_size(),
+        "all": crate::standards::TechnicalStandard::ALL.iter().map(|s| json!({
+            "code": s.code(),
+            "name": s.name(),
+            "short_name": s.short_name(),
+            "region": s.region(),
+            "description": s.description(),
+            "references": s.reference_standards(),
+        })).collect::<Vec<_>>()
+    }))
+}
+
 fn units(s: &mut Session, p: &Value) -> R {
     let c = "units";
     if let Some(name) = string(c, p, "length")? {
@@ -7679,6 +9320,21 @@ fn units(s: &mut Session, p: &Value) -> R {
         }
     }
     Ok(json!({"length": s.model.units.name()}))
+}
+
+fn room_area(s: &mut Session, p: &Value) -> R {
+    let c = "room_area";
+    only(c, p, &["at"])?;
+    if p.get("at").is_some_and(|v| !v.is_string()) {
+        return Err(bad(c, "`at` is centre or finish"));
+    }
+    if let Some(name) = string(c, p, "at")? {
+        let at = RoomArea::parse(&name).ok_or_else(|| bad(c, format!("`at` is centre or finish, not `{name}`")))?;
+        if at != s.model.room_area {
+            s.model_mut().room_area = at;
+        }
+    }
+    Ok(json!({"at": s.model.room_area.name()}))
 }
 
 /// `kind` `from` is called `to` now: its library entry, and everything that names it.
@@ -8420,7 +10076,7 @@ fn inspect(s: &mut Session, _: &Value) -> R {
         })
         .collect();
     Ok(json!({
-        "name": m.name, "units": "mm", "project_units": m.units.name(), "language": m.language.code(), "path": s.path, "levels": levels,
+        "name": m.name, "units": "mm", "project_units": m.units.name(), "room_area": m.room_area.name(), "language": m.language.code(), "standard": m.standard().code(), "path": s.path, "levels": levels,
         "counts": counts,
         "types": m.types, "materials": m.materials, "images": images(m), "families": families(m), "parameters": m.parameters,
         "view_filters": m.view_filters, "view_templates": m.view_templates, "phases": m.phases, "phase_filters": m.phase_filters,

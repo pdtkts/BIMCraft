@@ -2,6 +2,8 @@
 //! preview as they're typed, then made the project's, saved to a file or kept in the Favorites.
 //! Every change to the project is a `family` command, so it's checked, and undone, like any other.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 use std::collections::BTreeMap;
@@ -10,11 +12,11 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::family::{Category, Circle, Curve, Expr, Family, Form, Kind as Holds, Parameter, Plane, Symbol};
-use bimcraft_core::model::Model;
+use bimcraft_core::model::{Model, Operation};
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
 use egui::{
-    Align, CollapsingHeader, Color32, ColorImage, ComboBox, Context, Grid, Id as UiId, Layout, Modal, PointerButton, Rect, RichText,
-    ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align, CollapsingHeader, Color32, ColorImage, ComboBox, Context, Grid, Id as UiId, Layout, PointerButton, Rect, RichText, ScrollArea,
+    Sense, Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -304,6 +306,8 @@ pub(crate) struct FamilyEditor {
     types: Vec<(String, BTreeMap<String, String>)>,
     forms: Vec<FormText>,
     symbols: Vec<SymbolText>,
+    /// How a door's or a window's leaves open; none, not said.
+    operation: Option<Operation>,
     tab: Tab,
     /// The type shown in Types and on the preview.
     picked: usize,
@@ -340,6 +344,7 @@ impl FamilyEditor {
             types,
             forms: f.forms.iter().map(FormText::of).collect(),
             symbols: f.symbols.iter().map(SymbolText::of).collect(),
+            operation: f.operation,
             tab: Tab::Parameters,
             picked: 0,
             look: (AZIMUTH, ELEVATION),
@@ -391,7 +396,8 @@ impl FamilyEditor {
         }
         let forms = self.forms.iter().map(FormText::form).collect::<Result<_, _>>()?;
         let symbols = self.symbols.iter().map(SymbolText::symbol).collect::<Result<_, _>>()?;
-        Ok(Family { category: self.category, parameters, types, forms, symbols })
+        let operation = self.operation.filter(|_| self.category.hosted());
+        Ok(Family { category: self.category, parameters, types, forms, symbols, operation })
     }
 
     /// The `family` command's parameters making the project's family what's typed: its name, its own and the type it drops.
@@ -401,6 +407,8 @@ impl FamilyEditor {
         }
         let family = self.family()?;
         let mut p = serde_json::to_value(&family).map_err(|e| e.to_string())?;
+        // Said or not, so one taken off goes from the family too.
+        p["operation"] = json!(family.operation.map_or("", Operation::name));
         match &self.original {
             Some(was) => {
                 p["name"] = json!(was);
@@ -909,90 +917,109 @@ impl BimApp {
         ed.refresh(ctx, &base);
         let materials: Vec<String> = base.materials.keys().cloned().collect();
         let (mut apply, mut ok, mut cancel, mut save, mut favorite, mut load) = (false, false, false, false, false, false);
-        let r = Modal::new(UiId::new("family-editor")).show(ctx, |ui| {
-            ui.set_width(1000.0);
-            ui.label(RichText::new(t("Family Editor")).heading());
-            ui.add_space(4.0);
-            Grid::new("fe-head").num_columns(4).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-                let l = ui.label(t("Family name"));
-                ui.add_sized([220.0, ui.spacing().interact_size.y], TextEdit::singleline(&mut ed.name)).labelled_by(l.id);
-                let l = ui.label(t("Category"));
-                let c = ComboBox::from_id_salt("fe-category").selected_text(category_label(ed.category)).width(150.0).show_ui(ui, |ui| {
-                    for c in CATEGORIES {
-                        if ui.selectable_label(ed.category == c, category_label(c)).clicked() {
-                            ed.category = c;
-                        }
-                    }
-                });
-                c.response.labelled_by(l.id);
-                ui.end_row();
-            });
-            ui.add_space(6.0);
-            // What the tabs leave of the screen, to the buttons below: a small one scrolls them.
-            let room = (ctx.content_rect().height() - 330.0).clamp(160.0, 470.0);
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(620.0);
-                    ui.horizontal(|ui| {
-                        for (tab, label) in [
-                            (Tab::Parameters, msg!("Parameters")),
-                            (Tab::Types, msg!("Types")),
-                            (Tab::Forms, msg!("Forms")),
-                            (Tab::Symbols, msg!("Symbols")),
-                        ] {
-                            if ui.selectable_label(ed.tab == tab, t(label)).clicked() {
-                                ed.tab = tab;
+        let r = Modal::new(UiId::new("family-editor"), t("Family Editor")).width(1000.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(4.0);
+                Grid::new("fe-head").num_columns(4).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+                    let l = ui.label(t("Family name"));
+                    ui.add_sized([220.0, ui.spacing().interact_size.y], TextEdit::singleline(&mut ed.name)).labelled_by(l.id);
+                    let l = ui.label(t("Category"));
+                    let c =
+                        ComboBox::from_id_salt("fe-category").selected_text(category_label(ed.category)).width(150.0).show_ui(ui, |ui| {
+                            for c in CATEGORIES {
+                                if ui.selectable_label(ed.category == c, category_label(c)).clicked() {
+                                    ed.category = c;
+                                }
                             }
-                        }
-                    });
-                    ui.separator();
-                    ScrollArea::vertical().max_height(room).min_scrolled_height(room).auto_shrink([false, false]).show(ui, |ui| {
-                        match ed.tab {
-                            Tab::Parameters => parameters_tab(&mut ed, ui, &materials),
-                            Tab::Types => types_tab(&mut ed, ui, &materials),
-                            Tab::Forms => forms_tab(&mut ed, ui, &materials),
-                            Tab::Symbols => symbols_tab(&mut ed, ui),
-                        }
-                    });
+                        });
+                    c.response.labelled_by(l.id);
+                    ui.end_row();
+                    if ed.category.hosted() {
+                        let l = ui.label(t("Operation"));
+                        let shown = ed.operation.map_or(t("(none)"), |op| t(op.label()));
+                        let c = ComboBox::from_id_salt("fe-operation").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                            if ui.selectable_label(ed.operation.is_none(), t("(none)")).clicked() {
+                                ed.operation = None;
+                            }
+                            for op in Operation::ALL {
+                                if ui.selectable_label(ed.operation == Some(op), t(op.label())).clicked() {
+                                    ed.operation = Some(op);
+                                }
+                            }
+                        });
+                        c.response.labelled_by(l.id);
+                        ui.end_row();
+                    }
                 });
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.set_width(340.0);
-                    ui.label(RichText::new(t("Preview")).strong());
-                    let (rect, response) = ui.allocate_exact_size(vec2(340.0, 283.0), Sense::drag());
-                    if let Some((_, tile)) = &ed.preview {
-                        ui.painter().image(tile.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-                    }
-                    ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, pal().border), StrokeKind::Inside);
-                    if response.dragged_by(PointerButton::Primary) {
-                        let d = response.drag_delta();
-                        ed.look = (ed.look.0 - f64::from(d.x) * 0.5, (ed.look.1 + f64::from(d.y) * 0.5).clamp(-89.0, 89.0));
-                    }
-                    ui.label(RichText::new(t("Drag the picture to turn it.")).color(pal().muted));
-                    let names: Vec<String> = ed.types.iter().map(|(n, _)| n.clone()).collect();
-                    let now = names.get(ed.picked).cloned().unwrap_or_default();
-                    ui.horizontal(|ui| {
-                        ui.label(t("Previewing"));
-                        if let Some(n) = pick(ui, t("Preview Type").to_string(), &now, &names)
-                            && let Some(i) = names.iter().position(|x| *x == n)
-                        {
-                            ed.picked = i;
+                ui.add_space(6.0);
+                // What the tabs leave of the screen, to the buttons below: a small one scrolls them.
+                let room = (ctx.content_rect().height() - 330.0).clamp(160.0, 470.0);
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(620.0);
+                        ui.horizontal(|ui| {
+                            for (tab, label) in [
+                                (Tab::Parameters, msg!("Parameters")),
+                                (Tab::Types, msg!("Types")),
+                                (Tab::Forms, msg!("Forms")),
+                                (Tab::Symbols, msg!("Symbols")),
+                            ] {
+                                if ui.selectable_label(ed.tab == tab, t(label)).clicked() {
+                                    ed.tab = tab;
+                                }
+                            }
+                        });
+                        ui.separator();
+                        ScrollArea::vertical().max_height(room).min_scrolled_height(room).auto_shrink([false, false]).show(
+                            ui,
+                            |ui| match ed.tab {
+                                Tab::Parameters => parameters_tab(&mut ed, ui, &materials),
+                                Tab::Types => types_tab(&mut ed, ui, &materials),
+                                Tab::Forms => forms_tab(&mut ed, ui, &materials),
+                                Tab::Symbols => symbols_tab(&mut ed, ui),
+                            },
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(340.0);
+                        ui.label(RichText::new(t("Preview")).strong());
+                        let (rect, response) = ui.allocate_exact_size(vec2(340.0, 283.0), Sense::drag());
+                        if let Some((_, tile)) = &ed.preview {
+                            ui.painter().image(tile.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                        }
+                        ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, pal().border), StrokeKind::Inside);
+                        if response.dragged_by(PointerButton::Primary) {
+                            let d = response.drag_delta();
+                            ed.look = (ed.look.0 - f64::from(d.x) * 0.5, (ed.look.1 + f64::from(d.y) * 0.5).clamp(-89.0, 89.0));
+                        }
+                        ui.label(RichText::new(t("Drag the picture to turn it.")).color(pal().muted));
+                        let names: Vec<String> = ed.types.iter().map(|(n, _)| n.clone()).collect();
+                        let now = names.get(ed.picked).cloned().unwrap_or_default();
+                        ui.horizontal(|ui| {
+                            ui.label(t("Previewing"));
+                            if let Some(n) = pick(ui, t("Preview Type").to_string(), &now, &names)
+                                && let Some(i) = names.iter().position(|x| *x == n)
+                            {
+                                ed.picked = i;
+                            }
+                        });
+                        if let Some(p) = &ed.problem {
+                            ui.label(RichText::new(p).color(pal().error));
                         }
                     });
-                    if let Some(p) = &ed.problem {
-                        ui.label(RichText::new(p).color(pal().error));
-                    }
                 });
             });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                load = ui.button(t("Load Family…")).clicked();
-                save = ui.button(t("Save Family…")).clicked();
-                favorite = ui.button(t("Add to Favorites")).clicked();
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ok = ui.button(t("OK")).clicked();
-                    cancel = ui.button(t("Cancel")).clicked();
-                    apply = ui.button(t("Apply")).clicked();
+            crate::popup::footer(ui, |ui| {
+                ui.horizontal(|ui| {
+                    load = ui.button(t("Load Family…")).clicked();
+                    save = ui.button(t("Save Family…")).clicked();
+                    favorite = ui.button(t("Add to Favorites")).clicked();
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ok = ui.button(t("OK")).clicked();
+                        cancel = ui.button(t("Cancel")).clicked();
+                        apply = ui.button(t("Apply")).clicked();
+                    });
                 });
             });
         });

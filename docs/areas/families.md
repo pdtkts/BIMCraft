@@ -23,11 +23,22 @@ exterior, z up from the sill) and its formulas read `Wall Thickness`; its `symbo
 `Opening` holds a `family`, or none (one of the project's own types): `Model::opening_dims` gives its size either way
 (`opening_type` returns it by value), its flips are mirrors (`opening_local`), and `Element::family()` is the one way to ask what
 family a component or an opening is of. Sections show a family opening's forms beyond their line and never cut them.
+How a door or a window opens is its family's `operation` (`model::Operation`: swing, double-swing, sliding, double-sliding,
+folding, fixed), or for one of the project's own types the type's (`OpeningType::operation`); none, a door swings. IFC writes
+it as the door's `OperationType` (`Operation::ifc_door`, its side from `flip_hand`: `SLIDING_TO_RIGHT`) and a window's
+`PartitioningType` (two leaves, `DOUBLE_PANEL_VERTICAL`); the import reads a door's back, or its `IfcDoorType`'s (IFC4) or
+`IfcDoorStyle`'s (IFC2x3), onto the type it makes. Schedules have it as the `Operation` field, in the project's language. A
+window's panel operation (`IfcWindowPanelProperties`, a sliding sash) needs an `IfcWindowType`, which the export doesn't write yet.
 A material's `texture` (`texture.rs`) is a pattern drawn in code or a picture of `Model::images` (a PNG or JPEG comes in, is kept
 as a PNG of at most 1024 px, its header checked before the decoder makes room for it), laid on a face at its `size` in mm by the
 face's own axes (`view3d::basis`: across is level, up goes up it, east and north where it lies flat), sampled per pixel from the
-depth buffer, in the 3D view alone, from a mip chain. A triangle carries a texture id (one more than its material's place in the
-library); `Scene::new` resolves them. Paint (`paint.rs`) is `{face: material}` in an element's `params` under `Paint`, a reserved
+depth buffer, in the 3D view alone, from a mip chain. A triangle carries a skin (`view3d::skin`): in its low 24 bits a texture id (one more than its material's place in the
+library), in its high 8 its material's `transparency`; `Scene::new` resolves the textures. A material's `transparency` (percent,
+0 to 100, 0 opaque and not written, the starter Glass 70) is how see-through the 3D view draws what is made of it, with no view
+override: a layer's skin wins over its element's, paint gives a face its own, and a family-less window's glass takes the Glass
+material's. IFC carries it in `IFCSURFACESTYLESHADING`'s second argument (0 opaque to 1 clear, `$` for opaque), read back from a
+shading or a rendering. Only the nearest see-through surface is blended, so a glass wall's far face and stacked glass don't
+accumulate; plans and sections ignore it. Paint (`paint.rs`) is `{face: material}` in an element's `params` under `Paint`, a reserved
 name: a triangle's face is read from its winding, so every solid emits triangles turned out (`Solid::tris`, `prism`), and
 `Image::face` says which face a pixel is on. Favorites (`favorites.rs`) are a file of the user's own (`default_path`:
 `BIMCRAFT_FAVORITES`, else the configuration folder) with materials and their pictures, families and their materials; they change
@@ -36,7 +47,8 @@ a project only through the `favorite` command (`load` never overwrites without `
 preview is a scratch `Session` of its own, and it says what's wrong inside the window (the status box, over the view's corner, would lie on its
 buttons).
 
-A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
+A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
+library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
 tool needs one to place) and `purge` (every entry of the kinds asked that nothing uses). Use is what `Model::lib_refs_mut` visits, the one place
 that names every reference to a library entry: `Model::library_uses` counts them on a copy of the model, `Model::unused_entries` is one pass of
 what purge takes out (each category keeps its default's type, else its first; a family that goes takes its types), the command repeats it

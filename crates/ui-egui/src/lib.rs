@@ -5,15 +5,19 @@
 //! selection, the Options Bar, Properties over the Project Browser on the left, views in tabs
 //! (plans, the 3D view, schedules), and the tool's prompt in the status bar.
 
+use crate::popup::Modal;
+
 use bimcraft_i18n::msg;
 
 mod browser;
 mod cad;
+mod camera;
 mod canvas;
 mod clouds;
 mod context;
 pub mod control;
 mod dialog;
+mod dimtypes;
 mod dock;
 mod draw;
 mod editor;
@@ -31,13 +35,16 @@ mod linestyles;
 mod lineweights;
 mod links;
 mod mep;
+mod notes;
 mod objectstyles;
 mod orbit;
 mod paper;
 mod phasing;
+mod popup;
 mod properties;
 mod purge;
 pub mod recent;
+mod reinforce;
 mod renames;
 pub mod revit;
 mod ribbon;
@@ -46,12 +53,14 @@ mod section_box;
 pub mod settings;
 pub mod shortcuts;
 mod sketch;
+mod standards;
 mod start;
 mod structure;
 mod style;
 #[cfg(test)]
 mod tests;
 mod titlebar;
+mod typeprops;
 mod updates;
 pub mod window;
 
@@ -59,17 +68,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bimcraft_core::dims::Placing as DimMode;
 use bimcraft_core::engine::{self, Session};
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, STAIR_WIDTH};
+use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, RoomArea, STAIR_WIDTH};
 use bimcraft_core::snap::{Kind as Snap, Snaps};
 use bimcraft_core::units::Units;
 use bimcraft_core::{element_json, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
     Align, Align2, Area, CentralPanel, Color32, ComboBox, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key,
-    KeyboardShortcut, Layout, Margin, Modal, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, Ui, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
+    KeyboardShortcut, Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
+    StrokeKind, TextEdit, Ui, UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -160,12 +170,14 @@ pub enum Tool {
     Paint,
     /// Take the paint off the face clicked in the 3D view.
     Unpaint,
-    /// An aligned dimension: the references picked so far. A click away from any places it.
-    Dimension(Vec<Reference>),
+    /// An aligned or linear dimension, laid as its mode says: the references and points picked so far. A click away from
+    /// any places it.
+    Dimension(DimMode, Vec<Reference>),
     /// An angular dimension: the lines picked so far, two that meet; then a click where its arc goes.
     Angular(Vec<Reference>),
-    /// A radial dimension: the round column picked, then a click toward where its radius goes.
-    Radial(Option<Reference>),
+    /// A radial, diameter or arc length dimension: what round was picked (an arc length's, then two points on its arc, if
+    /// it measures part of it), then a click toward where it goes.
+    Round(DimKind, Vec<Reference>),
     /// A text note where clicked, saying what the Options Bar says.
     Text,
     /// A spot elevation where clicked.
@@ -294,10 +306,11 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 50] = [
+const SHORTCUTS: [(&str, &str); 53] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
+    ("RF", "Reinforce"),
     ("MM", msg!("Mirror Pick Axis")),
     ("DM", msg!("Mirror Draw Axis")),
     ("AL", msg!("Align")),
@@ -312,6 +325,8 @@ const SHORTCUTS: [(&str, &str); 50] = [
     ("VP", "Properties"),
     ("NP", "Project Browser"),
     ("SA", "Select All Instances"),
+    ("AG", msg!("Alignment Guides")),
+    ("OG", msg!("Orthogonal Guides")),
     ("SE", msg!("Snap to Endpoints")),
     ("SM", msg!("Snap to Midpoints")),
     ("SI", msg!("Snap to Intersections")),
@@ -417,6 +432,9 @@ pub struct BimApp {
     /// seen.
     drop_headers: Vec<(dock::Palette, Rect, bool)>,
     tab_bar: Rect,
+    /// How far down the view the tabs reach where they float over it (else the view's top): what floats over the view
+    /// (the Options Bar) and what docks along it start below.
+    tabs_foot: f32,
     tab_rects: Vec<(Sheet, Rect)>,
     work: Rect,
     pointer: Pos2,
@@ -516,6 +534,12 @@ pub struct BimApp {
     tag_label: String,
     /// What the Text tool writes.
     note_text: String,
+    /// The note being written on the canvas.
+    note_edit: Option<notes::NoteEdit>,
+    /// Text Type Properties, while it's open.
+    text_type_dialog: Option<notes::TextTypeDialog>,
+    dimension_type_dialog: Option<dimtypes::DimensionTypeDialog>,
+    dimension_text_dialog: Option<dimtypes::DimensionTextDialog>,
     /// The line style the Detail Line tool draws in; blank for the project's Thin Lines.
     line_style: String,
     /// The Linework tool's line style: a style's name, or `<Invisible lines>` or `<By Category>` (in English).
@@ -610,6 +634,9 @@ pub struct BimApp {
     /// Phasing and Design Options, while they're open, and the design option (`set: option`) new
     /// elements are made in: none is the main model.
     phasing_dialog: Option<phasing::PhasingDialog>,
+    /// Structure > Reinforce, while open, and what was typed in it for each kind of host.
+    reinforce_dialog: Option<reinforce::ReinforceDialog>,
+    reinforce_kept: BTreeMap<reinforce::Form, BTreeMap<&'static str, String>>,
     /// Manage > Line Weights, while open.
     line_weights_dialog: Option<lineweights::LineWeightsDialog>,
     /// Manage > Object Styles, while open.
@@ -624,6 +651,8 @@ pub struct BimApp {
     project: u64,
     /// How wide the ribbon's Mode panel was last drawn, to stand it at the ribbon's right end.
     mode_width: f32,
+    /// Manage > Technical Standards, while open.
+    standards_dialog: Option<standards::StandardsDialog>,
     options_dialog: Option<phasing::OptionsDialog>,
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
@@ -893,6 +922,9 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
     r
 }
 
+/// How tall a card floating over a view is (its tabs, its view control bar), points.
+const FLOATING_CARD: f32 = 30.0;
+
 impl BimApp {
     pub fn new(session: Session) -> BimApp {
         let first = Sheet::Plan(session.model.levels().first().map_or(0, |(id, _)| *id));
@@ -917,6 +949,7 @@ impl BimApp {
             dragging: None,
             drop_headers: Vec::new(),
             tab_bar: Rect::NOTHING,
+            tabs_foot: f32::NEG_INFINITY,
             tab_rects: Vec::new(),
             work: Rect::ZERO,
             pointer: Pos2::ZERO,
@@ -981,6 +1014,10 @@ impl BimApp {
             tag_leader: false,
             tag_label: String::new(),
             note_text: String::new(),
+            note_edit: None,
+            text_type_dialog: None,
+            dimension_type_dialog: None,
+            dimension_text_dialog: None,
             line_style: String::new(),
             linework_style: String::new(),
             group_type: String::new(),
@@ -1037,12 +1074,15 @@ impl BimApp {
             filters_dialog: None,
             templates_dialog: None,
             phasing_dialog: None,
+            reinforce_dialog: None,
+            reinforce_kept: BTreeMap::new(),
             line_weights_dialog: None,
             object_styles_dialog: None,
             line_styles_dialog: None,
             fill_patterns_dialog: None,
             sketch: None,
             mode_width: 0.0,
+            standards_dialog: None,
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
@@ -1130,7 +1170,7 @@ impl BimApp {
             Tool::Room => Some(msg!("Place Room")),
             Tool::Level => Some(msg!("Place Level")),
             Tool::Grid(_) => Some(msg!("Place Grid")),
-            Tool::Dimension(_) | Tool::Angular(_) | Tool::Radial(_) => Some(msg!("Place Dimensions")),
+            Tool::Dimension(..) | Tool::Angular(_) | Tool::Round(..) => Some(msg!("Place Dimensions")),
             Tool::Text => Some(msg!("Place Text")),
             Tool::DetailGroup => Some(msg!("Place Detail Group")),
             Tool::RepeatingDetail(_) => Some(msg!("Place Repeating Detail")),
@@ -1306,15 +1346,29 @@ impl BimApp {
         self.docks(ui);
         CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             let g = style::gap().max(4);
-            Panel::top("view-tabs")
-                .frame(Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }))
-                .show_separator_line(false)
-                .show(ui, |ui| {
-                    self.view_tabs(ui);
-                });
             let front = self.front;
-            self.view_pane(ui, front);
-            self.work = self.pane;
+            // A schedule's table keeps its rows clear of the tabs.
+            let table = matches!(self.sheet, Sheet::Schedule(_) | Sheet::Table(_));
+            if style::compact() || table {
+                Panel::top("view-tabs")
+                    .frame(Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }))
+                    .show_separator_line(false)
+                    .show(ui, |ui| {
+                        self.view_tabs(ui);
+                    });
+                self.view_pane(ui, front);
+                self.tabs_foot = f32::NEG_INFINITY;
+            } else {
+                // A drawn view fills the pane, and its tabs float over its top left corner on a card of their own: drawn after
+                // it, so they are over it for the hand too.
+                let pane = ui.available_rect_before_wrap();
+                ui.scope_builder(UiBuilder::new().max_rect(pane), |ui| self.view_pane(ui, front));
+                let card = style::card([true, false, true, false]).inner_margin(Margin::same(2));
+                // A child that takes no room of the pane's: over the view, not after it.
+                let mut over = ui.new_child(UiBuilder::new().id_salt("view-tabs").max_rect(pane));
+                self.tabs_foot = card.show(&mut over, |ui| self.view_tabs(ui)).response.rect.bottom();
+            }
+            self.work = self.pane.with_min_y(self.pane.top().max(self.tabs_foot));
         });
         self.options_bar(&ctx);
         if self.ribbon_min && self.ribbon_peek {
@@ -1357,9 +1411,14 @@ impl BimApp {
         }
     }
 
-    /// A view under its view control bar, as the active view draws it.
+    /// A view and its view control bar, as the active view draws it: the bar floating over its foot, or (Compact) under it.
     fn view_body(&mut self, ui: &mut Ui) {
-        self.view_control_bar(ui);
+        let floating = !style::compact();
+        if !floating {
+            self.view_control_bar(ui);
+        }
+        // What the floating tabs and view control bar take of the view's height: a tab and a bar each, and a gap round each.
+        self.canvas.room = if floating { 2.0 * (FLOATING_CARD + f32::from(style::gap())) } else { 0.0 };
         self.view_rect = ui.available_rect_before_wrap();
         self.pane = self.view_rect;
         // The plan sets the cursor each frame it shows.
@@ -1374,6 +1433,9 @@ impl BimApp {
             Sheet::Paper(id) => self.paper_view(ui, id),
             Sheet::Schedule(_) | Sheet::Table(_) => self.schedule(ui),
         }
+        if floating {
+            self.view_control_bar(ui);
+        }
         self.temp_frame(ui);
     }
 
@@ -1381,6 +1443,13 @@ impl BimApp {
     fn toggle_properties(&mut self) {
         let p = dock::Palette::Properties;
         self.show_palette(p, !self.docking.shown(p));
+    }
+
+    /// Toggle temporary alignment guides (smart snapping) on or off.
+    pub(crate) fn toggle_alignment_guides(&mut self) {
+        self.snaps.alignment_guides = !self.snaps.alignment_guides;
+        let text = if self.snaps.alignment_guides { t("Alignment guides on") } else { t("Alignment guides off") };
+        self.status = Status { text: text.to_string(), error: false };
     }
 
     /// Follow what the last command removed: the selection, views of levels that are gone, and
@@ -1444,8 +1513,20 @@ impl BimApp {
     }
 
     fn keys(&mut self, ctx: &Context) {
+        // A note being written takes the keys, but for a field's that has them; another tool finishes it.
+        if self.note_edit.is_some() {
+            if !matches!(self.tool, Tool::Text | Tool::Modify) {
+                self.finish_note();
+            } else if !ctx.egui_wants_keyboard_input() && self.text_type_dialog.is_none() {
+                self.note_keys(ctx);
+                return;
+            }
+        }
         // A dialog takes the keys while it's open.
         if self.type_dialog.is_some()
+            || self.text_type_dialog.is_some()
+            || self.dimension_type_dialog.is_some()
+            || self.dimension_text_dialog.is_some()
             || self.materials_dialog.is_some()
             || self.family_dialog.is_some()
             || self.favorites_dialog.is_some()
@@ -1456,6 +1537,7 @@ impl BimApp {
             || self.filters_dialog.is_some()
             || self.templates_dialog.is_some()
             || self.phasing_dialog.is_some()
+            || self.reinforce_dialog.is_some()
             || self.line_weights_dialog.is_some()
             || self.object_styles_dialog.is_some()
             || self.line_styles_dialog.is_some()
@@ -1544,8 +1626,17 @@ impl BimApp {
         if self.tool == Tool::Modify && pressed(Modifiers::NONE, Key::Space) {
             self.flip();
         }
+        // Space steps the Dimension tool's lay: Auto, Aligned, Horizontal, Vertical.
+        if let Tool::Dimension(mode, _) = &mut self.tool
+            && pressed(Modifiers::NONE, Key::Space)
+        {
+            *mode = mode.next();
+        }
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.component_angle = (self.component_angle + 90.0) % 360.0;
+        }
+        if pressed(Modifiers::NONE, Key::F8) || pressed(Modifiers::NONE, Key::F11) {
+            self.toggle_alignment_guides();
         }
         let typed: String = ctx.input(|i| {
             i.events
@@ -1623,6 +1714,10 @@ impl BimApp {
                 self.select_all_instances();
                 return true;
             }
+            "AG" | "OG" => {
+                self.toggle_alignment_guides();
+                return true;
+            }
             "KS" => {
                 self.show_shortcuts = true;
                 return true;
@@ -1630,6 +1725,11 @@ impl BimApp {
             // Floor: Structural.
             "SB" => {
                 self.structural_floor();
+                return true;
+            }
+            // Reinforce the element selected.
+            "RF" => {
+                self.open_reinforce();
                 return true;
             }
             "VV" | "VG" => {
@@ -1750,7 +1850,7 @@ impl BimApp {
                     self.ungroup();
                     return true;
                 }
-                Some("dimension") => Tool::Dimension(Vec::new()),
+                Some("dimension") => Tool::Dimension(DimMode::Aligned, Vec::new()),
                 Some("text") => Tool::Text,
                 Some("detail_line") => {
                     (self.drawing.insulation, self.drawing.cloud) = (None, None);
@@ -1867,9 +1967,13 @@ impl BimApp {
             Some(Element::Level(_)) => Tool::Level,
             Some(Element::Grid(_)) => Tool::Grid(None),
             Some(Element::Dimension(d)) => match d.kind {
-                DimKind::Aligned => Tool::Dimension(Vec::new()),
+                DimKind::Aligned => Tool::Dimension(DimMode::Aligned, Vec::new()),
+                DimKind::Linear if d.orient == Some(bimcraft_core::model::Orient::Vertical) => {
+                    Tool::Dimension(DimMode::Vertical, Vec::new())
+                }
+                DimKind::Linear => Tool::Dimension(DimMode::Horizontal, Vec::new()),
                 DimKind::Angular => Tool::Angular(Vec::new()),
-                DimKind::Radial => Tool::Radial(None),
+                k @ (DimKind::Radial | DimKind::Diameter | DimKind::ArcLength) => Tool::Round(k, Vec::new()),
             },
             Some(Element::Text(_)) => Tool::Text,
             Some(Element::DetailLine(l)) => {
@@ -2148,12 +2252,15 @@ impl BimApp {
             Tool::Grid(Some(_)) => Tool::Grid(None),
             Tool::Run(c, Some(_)) => Tool::Run(c, None),
             Tool::Mirror { draw, start: Some(_) } => Tool::Mirror { draw, start: None },
-            Tool::Align(Some(_)) => Tool::Align(None),
+            Tool::Align(Some(_)) => {
+                self.drawing.align_reference = None;
+                Tool::Align(None)
+            }
             Tool::Trim(Some(_)) => Tool::Trim(None),
             Tool::TrimTo { boundary: Some(_), many } => Tool::TrimTo { boundary: None, many },
-            Tool::Dimension(refs) if !refs.is_empty() => Tool::Dimension(Vec::new()),
+            Tool::Dimension(mode, refs) if !refs.is_empty() => Tool::Dimension(mode, Vec::new()),
             Tool::Angular(refs) if !refs.is_empty() => Tool::Angular(Vec::new()),
-            Tool::Radial(Some(_)) => Tool::Radial(None),
+            Tool::Round(k, picked) if !picked.is_empty() => Tool::Round(k, Vec::new()),
             Tool::Section(Some(_)) => Tool::Section(None),
             Tool::Measure(Some(_)) => Tool::Measure(None),
             // The ruler laid goes first, then the tool.
@@ -2253,8 +2360,8 @@ impl BimApp {
         match &mut self.tool {
             Tool::Wall(chain) => chain.clear(),
             Tool::Grid(start) | Tool::Run(_, start) => *start = None,
-            Tool::Dimension(refs) | Tool::Angular(refs) => refs.clear(),
-            Tool::Radial(r) => *r = None,
+            Tool::Dimension(_, refs) | Tool::Angular(refs) => refs.clear(),
+            Tool::Round(_, picked) => picked.clear(),
             Tool::Section(start) | Tool::Shaft(start) | Tool::Measure(start) => *start = None,
             Tool::Stair(pts)
             | Tool::Ramp(pts)
@@ -3010,41 +3117,85 @@ impl BimApp {
         );
     }
 
+    /// Annotate > Dimension, as Revit's: Aligned and Linear big, the others small beside them, two rows of three.
+    fn dimension_panel(&mut self, ui: &mut Ui) {
+        let big: [(Icon, &str, &str, Tool); 2] = [
+            (
+                Icon::Dimension,
+                msg!("Aligned"),
+                msg!(
+                    "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, or endpoints, then click \
+                     where the dimension line goes"
+                ),
+                Tool::Dimension(DimMode::Aligned, Vec::new()),
+            ),
+            (
+                Icon::Linear,
+                msg!("Linear"),
+                msg!(
+                    "Linear Dimension: pick endpoints (wall ends and corners, line ends, grid ends), then click where it goes: \
+                     horizontal or vertical as the cursor lies"
+                ),
+                Tool::Dimension(DimMode::Auto, Vec::new()),
+            ),
+        ];
+        let small: [(Icon, &str, &str, Tool); 5] = [
+            (
+                Icon::Angular,
+                msg!("Angular"),
+                msg!("Angular Dimension: pick two lines that meet, then click where the arc goes"),
+                Tool::Angular(Vec::new()),
+            ),
+            (
+                Icon::Radial,
+                msg!("Radial"),
+                msg!("Radial Dimension: pick a round column, a curved wall, a circle or an arc, then click where the radius goes"),
+                Tool::Round(DimKind::Radial, Vec::new()),
+            ),
+            (
+                Icon::Diameter,
+                msg!("Diameter"),
+                msg!("Diameter Dimension: pick a round column, a curved wall, a circle or an arc, then click where it goes"),
+                Tool::Round(DimKind::Diameter, Vec::new()),
+            ),
+            (
+                Icon::ArcLength,
+                msg!("Arc Length"),
+                msg!("Arc Length Dimension: pick a curved wall or an arc, then click where the dimension's arc goes"),
+                Tool::Round(DimKind::ArcLength, Vec::new()),
+            ),
+            (
+                Icon::Spot,
+                "Spot Elevation",
+                msg!("Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"),
+                Tool::Spot,
+            ),
+        ];
+        panel(ui, "Dimension", |ui| {
+            for (icon, label, tip, tool) in &big {
+                if big_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
+                    self.set_tool(tool.clone());
+                }
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for row in small.chunks(3) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 1.0;
+                        for (icon, label, tip, tool) in row {
+                            if small_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
+                                self.set_tool(tool.clone());
+                            }
+                        }
+                    });
+                }
+            });
+        });
+    }
+
     fn annotate_tab(&mut self, ui: &mut Ui) {
         self.select_panel(ui);
-        self.tools(
-            ui,
-            "Dimension",
-            &[
-                (
-                    Icon::Dimension,
-                    msg!("Aligned"),
-                    msg!(
-                        "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, then click where the \
-                     dimension line goes"
-                    ),
-                    Tool::Dimension(Vec::new()),
-                ),
-                (
-                    Icon::Angular,
-                    msg!("Angular"),
-                    msg!("Angular Dimension: pick two lines that meet, then click where the arc goes"),
-                    Tool::Angular(Vec::new()),
-                ),
-                (
-                    Icon::Radial,
-                    msg!("Radial"),
-                    msg!("Radial Dimension: pick a round column, then click where the radius goes"),
-                    Tool::Radial(None),
-                ),
-                (
-                    Icon::Spot,
-                    "Spot Elevation",
-                    msg!("Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"),
-                    Tool::Spot,
-                ),
-            ],
-        );
+        self.dimension_panel(ui);
         self.detail_panel(ui);
         self.region_panel(ui);
         self.tools(
@@ -3264,7 +3415,7 @@ impl BimApp {
                 self.cloud_dialog = true;
             }
             let tip = msg!(
-                "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+                "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
             );
             if big_button(ui, Icon::LinkCad, "Link CAD", self.cad_box.as_ref().is_some_and(|b| b.linked()), tip).clicked() {
                 self.cad_dialog = Some(true);
@@ -3272,7 +3423,7 @@ impl BimApp {
         });
         panel(ui, msg!("Import"), |ui| {
             let tip = msg!(
-                "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+                "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
             );
             if big_button(ui, Icon::ImportCad, "Import CAD", self.cad_box.as_ref().is_some_and(|b| !b.linked()), tip).clicked() {
                 self.cad_dialog = Some(false);
@@ -3316,6 +3467,11 @@ impl BimApp {
             if big_button(ui, Icon::Delete, "Purge Unused", self.purge_dialog.is_some(), tip).clicked() {
                 self.open_purge();
             }
+            let now_std = self.session.model.standard();
+            let tip = tf("Technical Standards: configure drawing standards (NBR, ISO, ANSI, EU); now {}", &[t(now_std.short_name())]);
+            if big_button(ui, Icon::Settings, "Technical Standards", self.standards_dialog.is_some(), &tip).clicked() {
+                self.standards_dialog = Some(standards::StandardsDialog::new(&self.session.model));
+            }
             // Fills, snaps and units, stacked.
             stacked(ui, |ui| {
                 let tip = msg!("Fill Patterns: the patterns filled regions fill with, and the filled region types");
@@ -3345,6 +3501,17 @@ impl BimApp {
             if big_button(ui, Icon::Keyboard, "Shortcuts", self.show_shortcuts, tip).clicked() {
                 self.show_shortcuts = true;
             }
+            // Where a room's area is measured, as Revit's Room Area Computation.
+            let now = self.session.model.room_area;
+            let tip = tf("Room Area Computation: where room areas are measured; now {}", &[&t(now.label()).to_lowercase()]);
+            let r = big_button(ui, Icon::Settings, "Room Area Computation", false, &tip);
+            ribbon::choices(ui, &r, false, |ui| {
+                for a in RoomArea::ALL {
+                    if ui.selectable_label(a == now, t(a.label())).clicked() {
+                        self.run("room_area", json!({"at": a.name()}));
+                    }
+                }
+            });
             // What the drawings say, and how new things are named.
             let now = self.session.model.language;
             let tip = tf("Project Language: what the drawings say and how new things are named; now {}", &[now.label()]);
@@ -3414,6 +3581,7 @@ impl BimApp {
         self.select_panel(ui);
         if self.sketch.is_some() {
             self.sketch_draw(ui);
+            self.sketch_modify_panel(ui);
             self.mode_panel(ui);
             return;
         }
@@ -3668,14 +3836,16 @@ impl BimApp {
     /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating over the
     /// view's top left, so the view never moves when it comes and goes, and taking the clicks that land on it.
     fn options_bar(&mut self, ctx: &Context) {
-        if self.context().is_none() && matches!(self.tool, Tool::Modify) {
+        if self.context().is_none() && matches!(self.tool, Tool::Modify) && self.note_edit.is_none() {
             self.options_rect = Rect::NOTHING;
             return;
         }
         let g = f32::from(style::gap());
         let view = self.view_rect;
         let frame = style::card([false; 4]).inner_margin(Margin::symmetric(10, 3));
-        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(view.left_top() + vec2(g, g)).show(ctx, |ui| {
+        // Below the tabs where they float over the view.
+        let top = view.top().max(self.tabs_foot - g + 4.0);
+        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(pos2(view.left() + g, top + g)).show(ctx, |ui| {
             // Kept short of the view's zoom buttons on the right, as far as its fields wrap (a drop-down doesn't).
             ui.set_max_width((view.width() - 2.0 * g - 60.0).max(200.0));
             frame.show(ui, |ui| self.options(ui));
@@ -3704,6 +3874,10 @@ impl BimApp {
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 ui.painter().text(r.left_center(), Align2::LEFT_CENTER, name, font, pal().text);
                 ui.separator();
+            }
+            if self.note_edit.is_some() {
+                self.note_options(ui);
+                return;
             }
             if self.sketch.is_some() {
                 self.sketch_options(ui);
@@ -3816,6 +3990,22 @@ impl BimApp {
                         .labelled_by(l.id);
                 }
                 Tool::DetailLine(_) => self.line_style_options(ui),
+                // Between endpoints: as the cursor lies, aligned, horizontal or vertical (Space steps them).
+                Tool::Dimension(mode, _) => {
+                    ui.label(t("Place:"));
+                    for (m, label) in [
+                        (DimMode::Auto, msg!("Auto")),
+                        (DimMode::Aligned, msg!("Aligned")),
+                        (DimMode::Horizontal, msg!("Horizontal")),
+                        (DimMode::Vertical, msg!("Vertical")),
+                    ] {
+                        if ui.selectable_label(mode == m, t(label)).clicked()
+                            && let Tool::Dimension(now, _) = &mut self.tool
+                        {
+                            *now = m;
+                        }
+                    }
+                }
                 Tool::Text => {
                     let l = ui.label(t("Text:"));
                     ui.add(TextEdit::singleline(&mut self.note_text).desired_width(240.0).hint_text(t("what the note says")))
@@ -3959,8 +4149,8 @@ impl BimApp {
             Tool::Mirror { draw: false, .. } => msg!("Pick a wall or grid to mirror across."),
             Tool::Mirror { draw: true, start: None } => msg!("Click the start of the mirror axis."),
             Tool::Mirror { draw: true, start: Some(_) } => msg!("Click the end of the mirror axis."),
-            Tool::Align(None) => msg!("Pick a reference line: a grid, or a wall's face or centre line."),
-            Tool::Align(Some(_)) => msg!("Pick the wall or grid to line up with the reference."),
+            Tool::Align(None) => msg!("Pick a reference edge or centre line; the line under the cursor is highlighted."),
+            Tool::Align(Some(_)) => msg!("Pick the element's highlighted edge to move and turn onto the reference."),
             Tool::Trim(None) => msg!("Pick the first wall or line, on the part to keep."),
             Tool::Trim(Some(_)) => msg!("Pick the second wall or line, on the part to keep."),
             Tool::TrimTo { boundary: None, .. } => msg!("Pick the line to trim or extend to: a line, a wall or a grid."),
@@ -3979,18 +4169,27 @@ impl BimApp {
             Tool::RepeatingDetail(Some(_)) => msg!("Click where it ends: the group repeats along the line every spacing."),
             Tool::Paint => msg!("Click a face to paint it with the material in the Options Bar; the 3D view orbits as ever."),
             Tool::Unpaint => msg!("Click a painted face to take its paint off."),
-            Tool::Dimension(refs) if refs.is_empty() => {
-                msg!("Pick a wall face, centre line or end, a door, a window or a grid to measure from.")
+            Tool::Dimension(_, refs) if refs.is_empty() => {
+                msg!("Pick a wall face, centre line or end, a door, a window, a grid, or an endpoint to measure from.")
             }
-            Tool::Dimension(refs) if refs.len() == 1 => msg!("Pick the next reference, parallel to the first."),
-            Tool::Dimension(_) => msg!("Pick more references, or click away from them where the dimension line goes. Esc cancels."),
+            Tool::Dimension(_, refs) if refs.len() == 1 => msg!("Pick the next reference or endpoint."),
+            Tool::Dimension(..) => msg!(
+                "Pick more references, or click away from them where the dimension line goes; Space steps Auto, Aligned, Horizontal, \
+                 Vertical. Esc cancels."
+            ),
             Tool::Measure(None) => msg!("Click the ruler's start: points snap as they do drawing."),
             Tool::Measure(Some(_)) => msg!("Click its end: its length and angle read beside it. Esc cancels."),
             Tool::Tag => msg!("Click an element to tag it with its type, a door's or window's with its mark, or with the field in Label."),
             Tool::Angular(refs) if refs.len() < 2 => msg!("Pick a wall, a grid or another line; then one that meets it."),
             Tool::Angular(_) => msg!("Click where the arc goes: the angle on that side. Esc cancels."),
-            Tool::Radial(None) => msg!("Pick a round column."),
-            Tool::Radial(Some(_)) => msg!("Click where the radius goes. Esc cancels."),
+            Tool::Round(DimKind::ArcLength, picked) if picked.is_empty() => msg!("Pick a curved wall or an arc."),
+            Tool::Round(_, picked) if picked.is_empty() => msg!("Pick a round column, a curved wall, a circle or an arc."),
+            Tool::Round(DimKind::ArcLength, picked) if picked.len() == 2 => msg!("Pick the second point on the arc. Esc cancels."),
+            Tool::Round(DimKind::ArcLength, _) => {
+                msg!("Click where the dimension's arc goes, or pick two points on the arc to measure between. Esc cancels.")
+            }
+            Tool::Round(DimKind::Diameter, _) => msg!("Click where the diameter goes. Esc cancels."),
+            Tool::Round(..) => msg!("Click where the radius goes. Esc cancels."),
             Tool::Text => msg!("Type the note in the Options Bar, then click where it goes: its top left corner."),
             Tool::Spot => msg!("Click a floor, a roof, a stair or a wall: the spot elevation reads the height of its top there."),
             Tool::Section(None) => msg!("Click the section's start: it looks to the left of the line you draw."),
@@ -4074,7 +4273,7 @@ impl BimApp {
         }
         let (title, color) = if self.status.error { (t("Error"), pal().error) } else { (t("Note"), pal().accent_ink) };
         let at = self.view_rect.right_bottom() - vec2(16.0, 16.0);
-        Area::new(UiId::new("warning")).order(Order::Foreground).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
+        Area::new(UiId::new("warning")).order(Order::Middle).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
             Frame::popup(ui.style()).fill(pal().surface).stroke(Stroke::new(1.0, color)).show(ui, |ui| {
                 ui.set_max_width(380.0);
                 ui.horizontal(|ui| {
@@ -4269,10 +4468,15 @@ impl BimApp {
         self.filters_window(ctx);
         self.templates_window(ctx);
         self.phasing_window(ctx);
+        self.reinforce_window(ctx);
         self.line_weights_window(ctx);
         self.object_styles_window(ctx);
         self.line_styles_window(ctx);
         self.fill_patterns_window(ctx);
+        self.text_type_window(ctx);
+        self.dimension_type_window(ctx);
+        self.dimension_text_window(ctx);
+        self.standards_window(ctx);
         self.options_window(ctx);
         self.purge_window(ctx);
         if std::mem::take(&mut self.link_dialog) {
@@ -4306,16 +4510,18 @@ impl BimApp {
         }
         let mut choice = None;
         let name = self.session.model.name.clone();
-        let r = Modal::new(UiId::new("unsaved")).show(ctx, |ui| {
-            ui.label(RichText::new(tf("Save changes to {}?", &[&name])).strong());
-            ui.label(t("If you don't, the changes since it was last saved are lost."));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                for (label, c) in [("Save", Choice::Save), (msg!("Don't Save"), Choice::Discard), ("Cancel", Choice::Cancel)] {
-                    if ui.button(t(label)).clicked() {
-                        choice = Some(c);
+        let r = Modal::new(UiId::new("unsaved"), tf("Save changes to {}?", &[&name])).width(580.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.label(t("If you don't, the changes since it was last saved are lost."));
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for (label, c) in [("Save", Choice::Save), (msg!("Don't Save"), Choice::Discard), ("Cancel", Choice::Cancel)] {
+                        if ui.button(t(label)).clicked() {
+                            choice = Some(c);
+                        }
                     }
-                }
+                });
             });
         });
         if choice.is_some() || r.should_close() {

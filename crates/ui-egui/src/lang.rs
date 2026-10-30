@@ -1,4 +1,4 @@
-//! The interface's language: English, as the code writes it, Brazilian Portuguese, Spanish, Vietnamese or Simplified Chinese.
+//! The interface's language: English, as the code writes it, Brazilian Portuguese, Spanish, Vietnamese, Czech, French or Simplified Chinese.
 //! What
 //! the window shows goes through [`t`], English being its own key; the widget helpers translate
 //! their labels and tips, so most call sites pass English and read it back translated. What a
@@ -47,11 +47,13 @@ pub enum Lang {
     Portuguese,
     Spanish,
     Vietnamese,
+    Czech,
+    French,
     Chinese,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 5] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::Chinese];
+    pub const ALL: [Lang; 7] = [Lang::English, Lang::Portuguese, Lang::Spanish, Lang::Vietnamese, Lang::Czech, Lang::French, Lang::Chinese];
 
     /// The project language that goes with it, which new projects are named in: Chinese has none, so English.
     pub fn project(self) -> Language {
@@ -60,6 +62,8 @@ impl Lang {
             Lang::Portuguese => Language::Portuguese,
             Lang::Spanish => Language::Spanish,
             Lang::Vietnamese => Language::Vietnamese,
+            Lang::Czech => Language::Czech,
+            Lang::French => Language::French,
         }
     }
 
@@ -96,10 +100,12 @@ impl Lang {
 impl From<Language> for Lang {
     fn from(language: Language) -> Lang {
         match language {
-            Language::English => Lang::English,
+            Language::English | Language::Swedish => Lang::English,
             Language::Portuguese => Lang::Portuguese,
             Language::Spanish => Lang::Spanish,
             Language::Vietnamese => Lang::Vietnamese,
+            Language::Czech => Lang::Czech,
+            Language::French => Lang::French,
         }
     }
 }
@@ -356,7 +362,7 @@ pub fn system_font(lang: Lang) -> Option<(Vec<u8>, u32)> {
     match lang {
         Lang::Chinese => chinese_font(),
         Lang::Vietnamese => vietnamese_font(),
-        Lang::English | Lang::Portuguese | Lang::Spanish => None,
+        Lang::English | Lang::Portuguese | Lang::Spanish | Lang::Czech | Lang::French => None,
     }
 }
 
@@ -537,6 +543,7 @@ mod tests {
             [Some(Lang::Portuguese), Some(Lang::Spanish), Some(Lang::English), None, None]
         );
         assert_eq!((Lang::Chinese.code(), Lang::Chinese.project()), ("zh", Language::English), "a project is never in Chinese");
+        assert_eq!(Lang::from(Language::Swedish), Lang::English, "Swedish is a project language until its interface catalog is added");
         assert_eq!(Lang::ALL.map(|l| Lang::from_code(l.code())), Lang::ALL.map(Some));
         assert_eq!([Lang::Vietnamese.code(), Lang::Vietnamese.label()], ["vi", "Tiếng Việt"]);
         assert_eq!(Lang::Vietnamese.project(), Language::Vietnamese, "a project is in Vietnamese, so its drawings print it too");
